@@ -400,6 +400,32 @@ The module creates two systemd services:
 - `estrella-rfcomm.service` - Oneshot that sets up the Bluetooth RFCOMM device (runs as root)
 - `estrella.service` - The HTTP daemon (runs unprivileged with DynamicUser)
 
+### Docker
+
+Multi-arch (amd64/arm64) images are published to GitHub Packages. The image serves the web UI and JSON API on port 8080 and suits network printers:
+
+```bash
+docker run -p 8080:8080 \
+  -e ESTRELLA_PROTOCOL=escpos \
+  -e ESTRELLA_ADDRESS=192.168.1.50 \
+  ghcr.io/blybot/estrella:<version>
+```
+
+Build it locally with `docker build .` (add `--build-arg CARGO_BUILD_JOBS=1` on memory-constrained hosts), and check a build with `scripts/smoke-test-image.sh <image>`.
+
+### Kubernetes
+
+A Helm chart is published as an OCI artifact:
+
+```bash
+helm install estrella oci://ghcr.io/blybot/helm/estrella --version <version> \
+  --set printer.protocol=escpos \
+  --set printer.address=192.168.1.50 \
+  --set ingress.host=estrella.example.com
+```
+
+The API has no authentication, so restrict access at the ingress. See [`helm/estrella/README.md`](helm/estrella/README.md) for all values and an ingress-nginx example.
+
 ### Bluetooth Setup
 
 **Important:** The TSP650II ships in SSP (Secure Simple Pairing) mode which doesn't work with Linux. You need the **Star Settings** iOS/Android app to:

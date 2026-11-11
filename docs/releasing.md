@@ -1,6 +1,8 @@
 # Releasing estrella
 
-This document covers the full release process for publishing `.deb` packages via a flat apt repository hosted on GitHub Releases.
+This document covers how releases are cut and published: a multi-arch container image and Helm chart on GitHub Packages (ghcr.io), and `.deb` packages via a flat apt repository hosted on GitHub Releases.
+
+The apt repository is optional: without the GPG secrets below, releases still publish the image, chart and `.deb`, and the apt step is skipped with a notice.
 
 ## One-time setup
 
@@ -49,23 +51,28 @@ That's it — no GitHub Pages setup needed. The `apt` release is created automat
 
 ## Releasing a new version
 
-```bash
-make bump-patch-release
-```
+Releases are automatic. Every push to `main` runs the checks (`.github/workflows/release.yml`), then `scripts/next-version.sh` reads the [conventional commits](https://www.conventionalcommits.org/) since the latest `vX.Y.Z` tag:
 
-This fetches tags from GitHub, bumps the patch version (e.g., `v0.1.0` → `v0.1.1`), updates `Cargo.toml`, commits, tags, and pushes. The CI takes over from there.
+| Commits since the last release | Release |
+|--------------------------------|---------|
+| `type!:` or a `BREAKING CHANGE:` footer | major |
+| `feat:` / `feature:` | minor |
+| `fix:`, `bugfix:`, `perf:`, `refactor:` | patch |
+| anything else (`docs:`, `ci:`, `chore:`, `build:`, dependabot's "Bump x") | none |
 
-For manual releases or non-patch bumps:
+So merging dependency bumps on their own doesn't release; they ship with the next `feat`/`fix`. With no tags yet, the whole history is compared against upstream's last release, v0.1.2.
 
-1. Update the version in `Cargo.toml`
-2. Commit: `git commit -am "release: v0.2.0"`
-3. Tag and push: `git tag v0.2.0 && git push && git push --tags`
+When a release is due, CI:
+1. Stamps the version into `Cargo.toml` and `Cargo.lock` for the build (`scripts/stamp-version.sh`; not committed, so the committed version stays at the last manual bump)
+2. Builds and pushes `ghcr.io/<owner>/estrella:X.Y.Z` (and `:X.Y`) for linux/amd64 and linux/arm64, on native runners for each
+3. Packages the Helm chart as version `X.Y.Z` (appVersion `X.Y.Z`) and pushes it to `oci://ghcr.io/<owner>/helm/estrella`
+4. Builds the static arm64 `.deb`
+5. Only once all of that succeeds, tags the commit `vX.Y.Z` and creates a GitHub Release with the `.deb` attached
+6. Updates the flat apt repository on the `apt` release, if the GPG secrets are set
 
-The CI workflow automatically:
-- Builds a static arm64 binary (no native dependencies)
-- Packages it as a `.deb` with systemd services
-- Creates a GitHub Release with the `.deb` attached
-- Updates the flat apt repository on the `apt` release
+Pull requests run the same checks (Rust, frontend e2e, Helm chart, container image smoke test) without publishing.
+
+New packages on ghcr.io are private by default. Make `estrella` and `helm/estrella` public under the owner's Packages settings, or give your cluster pull credentials.
 
 ## How the apt repository works
 
@@ -119,23 +126,18 @@ Each release:
 
 ## What the CI does
 
-### Build job (runs on `ubuntu-24.04-arm`)
-
-Native aarch64 build using Nix:
-1. Installs Nix via `cachix/install-nix-action`
-2. Runs `nix build .#static` — Nix handles Rust nightly, musl, Node.js, frontend build, everything
-3. Packages the static binary with [nfpm](https://nfpm.goreleaser.com/) into a `.deb`
-4. Creates a GitHub Release for the version tag
-
-### Publish job (runs on `ubuntu-24.04`)
-
-Updates the flat apt repository on the `apt` release:
-1. Downloads the `.deb` from the build job
-2. Uploads it to the `apt` release
-3. Downloads all `.deb` files from the `apt` release
-4. Regenerates package indices with `dpkg-scanpackages`
-5. Signs the Release file with GPG
-6. Uploads metadata to the `apt` release (overwriting old metadata)
+| Job | Runner | What it does |
+|-----|--------|--------------|
+| `check` | ubuntu-24.04 | Nix build, frontend build, fmt, clippy, tests, Playwright e2e |
+| `helm` | ubuntu-24.04 | `scripts/test-helm-chart.sh` and `scripts/test-next-version.sh` |
+| `image` (check) | ubuntu-24.04 | Builds the image and runs `scripts/smoke-test-image.sh` against a fake TCP printer |
+| `version` | ubuntu-24.04 | Decides the next version, or that there's nothing to release |
+| `image` (release) | ubuntu-24.04 / ubuntu-24.04-arm | Builds and pushes each architecture by digest |
+| `image-manifest` | ubuntu-24.04 | Combines the digests into the multi-arch `X.Y.Z` and `X.Y` tags |
+| `chart` | ubuntu-24.04 | `helm package` + `helm push` to ghcr.io |
+| `build-deb` | ubuntu-24.04-arm | `nix build .#static`, packaged with [nfpm](https://nfpm.goreleaser.com/) |
+| `release` | ubuntu-24.04 | Tags `vX.Y.Z` and creates the GitHub Release |
+| `publish-apt` | ubuntu-24.04 | Regenerates and signs the apt repository on the `apt` release |
 
 ## Verifying the apt repo
 
@@ -174,4 +176,4 @@ The `.deb` package contains:
 - `/usr/lib/systemd/system/estrella-rfcomm.service` — Bluetooth RFCOMM setup
 - `/etc/estrella/estrella.conf` — configuration (survives upgrades)
 
-The binary is built with `--no-default-features` which disables HEIC/HEIF image support (requires libheif C library). Users should convert iPhone photos to JPEG before uploading. All other features work identically to the Nix build.
+The binary is built with `--no-default-features` which disables HEIC/HEIF image support (requires libheif C library). Users should convert iPhone photos to JPEG before uploading. All other features work identically to the Nix build. The container image links Debian's libheif and supports HEIC.

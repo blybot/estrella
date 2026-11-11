@@ -8,7 +8,8 @@ use std::thread;
 const ESCPOS_PREAMBLE: [u8; 11] = [
     0x1B, 0x40, 0x1D, 0x50, 203, 203, 0x1C, 0x2E, 0x1B, 0x74, 0x00,
 ];
-const ESCPOS_PARTIAL_CUT: [u8; 4] = [0x1D, 0x56, 0x42, 0x00];
+/// GS V 66, followed by the cut's extra feed.
+const ESCPOS_PARTIAL_CUT: [u8; 3] = [0x1D, 0x56, 0x42];
 
 fn estrella() -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_estrella"));
@@ -38,7 +39,11 @@ fn fake_printer() -> (String, thread::JoinHandle<Vec<u8>>) {
 
 fn assert_escpos_receipt(bytes: &[u8]) {
     assert!(bytes.starts_with(&ESCPOS_PREAMBLE), "missing ESC/POS init");
-    assert!(bytes.ends_with(&ESCPOS_PARTIAL_CUT), "missing ESC/POS cut");
+    assert_eq!(
+        &bytes[bytes.len() - 4..bytes.len() - 1],
+        ESCPOS_PARTIAL_CUT,
+        "missing ESC/POS cut"
+    );
     // StarPRNT's ESC GS prefix must not appear in ESC/POS output.
     assert!(!bytes.windows(2).any(|w| w == [0x1B, 0x1D]));
 }

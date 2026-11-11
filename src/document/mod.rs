@@ -520,7 +520,9 @@ mod tests {
 
         let bytes = doc.build_for(Protocol::EscPos).unwrap();
 
-        let expected_tail: Vec<u8> = [ESCPOS_PARTIAL_CUT, ESCPOS_BEEP].concat();
+        // Raster mode feeds 6mm (48 dots) before the cut, carried by the cut.
+        let cut_after_6mm = [0x1D, 0x56, 0x42, 48];
+        let expected_tail: Vec<u8> = [cut_after_6mm, ESCPOS_BEEP].concat();
         assert!(bytes.ends_with(&expected_tail), "{bytes:02X?}");
     }
 

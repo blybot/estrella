@@ -47,11 +47,12 @@ pub fn code_table(n: u8) -> Vec<u8> {
     vec![ESC, b't', n]
 }
 
-/// GS V m n - feed paper to the cutting position plus `n` dots, then cut.
+/// GS V m n - feed paper to the cutting position plus `n` motion units, then
+/// cut.
 ///
 /// Function B: m = 65 (full cut) or 66 (partial cut).
-pub fn cut_feed(partial: bool) -> Vec<u8> {
-    vec![GS, b'V', if partial { 66 } else { 65 }, 0]
+pub fn cut_feed(partial: bool, extra_feed: u8) -> Vec<u8> {
+    vec![GS, b'V', if partial { 66 } else { 65 }, extra_feed]
 }
 
 /// ESC B n t - sound the buzzer `n` times for `t` × 50 ms each.
@@ -238,8 +239,9 @@ mod tests {
 
     #[test]
     fn cut_uses_function_b_with_feed() {
-        assert_eq!(cut_feed(true), vec![0x1D, 0x56, 0x42, 0x00]);
-        assert_eq!(cut_feed(false), vec![0x1D, 0x56, 0x41, 0x00]);
+        assert_eq!(cut_feed(true, 0), vec![0x1D, 0x56, 0x42, 0x00]);
+        assert_eq!(cut_feed(false, 0), vec![0x1D, 0x56, 0x41, 0x00]);
+        assert_eq!(cut_feed(true, 160), vec![0x1D, 0x56, 0x42, 160]);
     }
 
     #[test]

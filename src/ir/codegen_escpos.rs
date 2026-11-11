@@ -28,7 +28,7 @@ const RASTER_CHUNK_ROWS: usize = 256;
 
 /// Dots at 203 dpi per IR feed unit (1/4 mm). Init sets the motion units to
 /// dots with GS P, so ESC J and ESC $ take dot counts.
-const DOTS_PER_FEED_UNIT: u16 = 2;
+const DOTS_PER_FEED_UNIT: u32 = 2;
 
 /// Rows per Star band (`Op::Band`).
 const BAND_ROWS: usize = 24;
@@ -58,8 +58,15 @@ impl Program {
         let dpi = config.dpi.min(255) as u8;
         let mut state = EncoderState::default();
         let mut out = Vec::new();
+        // Feeds are held back so one right before a cut can go into the cut
+        // command itself. Xprinter's cut feeds to the cutter counting from the
+        // last printed line, so a separate ESC J there would be swallowed.
+        let mut pending_feed_dots: u32 = 0;
 
         for op in &self.ops {
+            if !matches!(op, Op::Feed { .. } | Op::Cut { .. }) {
+                feed(&mut out, std::mem::take(&mut pending_feed_dots));
+            }
             match op {
                 Op::Init => {
                     out.extend(escpos::init());
@@ -68,16 +75,16 @@ impl Program {
                     out.extend(escpos::code_table(0));
                     state = EncoderState::default();
                 }
-                Op::Cut { partial } => out.extend(escpos::cut_feed(*partial)),
+                Op::Cut { partial } => {
+                    let extra = std::mem::take(&mut pending_feed_dots);
+                    let in_cut = extra.min(255);
+                    feed(&mut out, extra - in_cut);
+                    out.extend(escpos::cut_feed(*partial, in_cut as u8));
+                }
                 // Two 150 ms beeps
                 Op::Beep => out.extend(escpos::beep(2, 3)),
                 Op::Feed { units } => {
-                    let mut dots = *units as u16 * DOTS_PER_FEED_UNIT;
-                    while dots > 0 {
-                        let step = dots.min(255);
-                        out.extend(escpos::feed_dots(step as u8));
-                        dots -= step;
-                    }
+                    pending_feed_dots += *units as u32 * DOTS_PER_FEED_UNIT;
                 }
 
                 Op::SetAlign(alignment) => {
@@ -203,7 +210,17 @@ impl Program {
             }
         }
 
+        feed(&mut out, pending_feed_dots);
         Ok(out)
+    }
+}
+
+/// Feed `dots` with ESC J, which takes at most 255 per command.
+fn feed(out: &mut Vec<u8>, mut dots: u32) {
+    while dots > 0 {
+        let step = dots.min(255);
+        out.extend(escpos::feed_dots(step as u8));
+        dots -= step;
     }
 }
 
@@ -325,6 +342,42 @@ mod tests {
             encode(vec![Op::Feed { units: 200 }]),
             vec![0x1B, 0x4A, 255, 0x1B, 0x4A, 145]
         );
+    }
+
+    #[test]
+    fn feed_before_a_cut_becomes_the_cuts_extra_feed() {
+        // Xprinter's cut feeds to the cutter counting from the last printed
+        // line, which swallows a separate ESC J feed before it.
+        let bytes = encode(vec![
+            Op::Text("x".into()),
+            Op::Newline,
+            Op::Feed { units: 80 },
+            Op::Cut { partial: true },
+        ]);
+        assert_eq!(bytes, vec![b'x', 0x0A, 0x1D, 0x56, 0x42, 160]);
+    }
+
+    #[test]
+    fn feed_before_a_cut_beyond_255_dots_feeds_the_rest_first() {
+        // 200 units = 400 dots → ESC J 145, then cut with 255
+        let bytes = encode(vec![Op::Feed { units: 200 }, Op::Cut { partial: false }]);
+        assert_eq!(bytes, vec![0x1B, 0x4A, 145, 0x1D, 0x56, 0x41, 255]);
+    }
+
+    #[test]
+    fn consecutive_feeds_before_a_cut_add_up() {
+        let bytes = encode(vec![
+            Op::Feed { units: 20 },
+            Op::Feed { units: 4 },
+            Op::Cut { partial: true },
+        ]);
+        assert_eq!(bytes, vec![0x1D, 0x56, 0x42, 48]);
+    }
+
+    #[test]
+    fn feed_followed_by_content_is_sent_before_it() {
+        let bytes = encode(vec![Op::Feed { units: 24 }, Op::Text("x".into())]);
+        assert_eq!(bytes, vec![0x1B, 0x4A, 48, b'x']);
     }
 
     #[test]

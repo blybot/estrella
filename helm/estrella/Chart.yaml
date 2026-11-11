@@ -1,0 +1,10 @@
+apiVersion: v2
+name: estrella
+description: Thermal receipt printer web UI and JSON API (StarPRNT and ESC/POS)
+type: application
+# Set by CI at package time (helm package --version/--app-version).
+version: 0.0.0
+appVersion: "0.0.0"
+home: https://github.com/blybot/estrella
+sources:
+  - https://github.com/blybot/estrella

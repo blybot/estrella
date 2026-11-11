@@ -1,0 +1,44 @@
+image:
+  repository: ghcr.io/blybot/estrella
+  # tag: defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Required: the printer to send jobs to. Only network (raw TCP) printers are
+# supported in Kubernetes.
+# printer:
+#   protocol: escpos       # escpos or star
+#   address: 192.168.1.50  # host or host:port; the port defaults to 9100
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: ""
+  # Required when the ingress is enabled.
+  # host: estrella.example.com
+  # The API is unauthenticated: anyone who can reach it can print. Restrict it
+  # here (e.g. ingress-nginx basic auth), and raise the request body limit so
+  # photo uploads (up to 50 MB) get through. See README.md.
+  annotations: {}
+  tls:
+    enabled: false
+    # Defaults to <release name>-tls.
+    secretName: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 256Mi
+
+# Extra environment variables, rendered after the chart's own so they can
+# override them.
+extraEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

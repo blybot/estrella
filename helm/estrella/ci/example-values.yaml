@@ -1,0 +1,13 @@
+printer:
+  protocol: escpos
+  address: 192.168.1.50
+
+ingress:
+  className: nginx
+  host: estrella.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 50m
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: estrella-basic-auth
+  tls:
+    enabled: true

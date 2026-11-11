@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "estrella.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  # One printer, and photo uploads are held in memory between the upload and
+  # print requests, so never run two pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "estrella.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "estrella.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: estrella
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion ((.Values.image).tag) | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ESTRELLA_LISTEN
+              value: "0.0.0.0:8080"
+            - name: ESTRELLA_PROTOCOL
+              value: {{ required "printer.protocol is required (escpos or star)" (.Values.printer).protocol | quote }}
+            - name: ESTRELLA_ADDRESS
+              value: {{ required "printer.address is required (host or host:port)" (.Values.printer).address | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # /healthz doesn't contact the printer, so a printer that's switched
+          # off doesn't take the web UI down.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,30 +1,187 @@
 name: Release
 
+# Every push to main is checked. If the commits since the last release include
+# conventional-commit types that warrant a release (feat → minor, fix/perf/... →
+# patch, `!`/BREAKING CHANGE → major), the image, Helm chart and .deb are
+# published, then the commit is tagged vX.Y.Z and a GitHub release is created.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  IMAGE: ghcr.io/${{ github.repository_owner }}/estrella
+  CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/helm
 
 jobs:
   check:
     uses: ./.github/workflows/check.yml
 
-  build-deb:
-    name: Build .deb (arm64)
+  version:
+    name: Decide version
     needs: check
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Next version from conventional commits
+        id: next
+        run: |
+          version="$(scripts/next-version.sh)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$version" ]; then
+            echo "Releasing v$version" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No release-worthy commits since the last release" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  image:
+    name: Image (${{ matrix.arch }})
+    needs: version
+    if: needs.version.outputs.version != ''
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Parse version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version
+        run: scripts/stamp-version.sh "${{ needs.version.outputs.version }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+
+  image-manifest:
+    name: Image manifest
+    needs: [version, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Create multi-arch manifest
+        working-directory: digests
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create \
+            -t "$IMAGE:$VERSION" \
+            -t "$IMAGE:${VERSION%.*}" \
+            "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+  chart:
+    name: Helm chart
+    # After the images, so a published chart never points at a missing image.
+    needs: [version, image-manifest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Package and push chart
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          echo "${{ github.token }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package helm/estrella --version "$VERSION" --app-version "$VERSION" -d packaged
+          helm push "packaged/estrella-$VERSION.tgz" "$CHART_REPO"
+
+  build-deb:
+    name: Build .deb (arm64)
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Stamp version
+        run: scripts/stamp-version.sh "$VERSION"
 
       - name: Install Nix
         uses: cachix/install-nix-action@v31
@@ -44,43 +201,60 @@ jobs:
           sudo dpkg -i nfpm.deb
 
       - name: Build .deb package
-        run: |
-          VERSION=${{ steps.version.outputs.version }} nfpm package \
-            --packager deb \
-            --target estrella_${{ steps.version.outputs.version }}_arm64.deb
+        run: nfpm package --packager deb --target "estrella_${VERSION}_arm64.deb"
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v7
         with:
           name: deb-package
-          path: estrella_${{ steps.version.outputs.version }}_arm64.deb
+          path: estrella_${{ env.VERSION }}_arm64.deb
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: estrella_${{ steps.version.outputs.version }}_arm64.deb
-          generate_release_notes: true
-
-  publish-apt:
-    name: Publish apt repository
-    needs: build-deb
+  release:
+    name: Tag and GitHub release
+    needs: [version, image-manifest, chart, build-deb]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - name: Parse version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Download .deb artifact
         uses: actions/download-artifact@v8
         with:
           name: deb-package
 
+      - name: Create tag and GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: estrella_${{ needs.version.outputs.version }}_arm64.deb
+          generate_release_notes: true
+
+  publish-apt:
+    name: Publish apt repository
+    needs: [version, release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+    steps:
+      - name: Skip without a signing key
+        if: env.GPG_PRIVATE_KEY == ''
+        run: echo "::notice::GPG_PRIVATE_KEY isn't set; skipping the apt repository (see docs/releasing.md)"
+
+      - name: Download .deb artifact
+        if: env.GPG_PRIVATE_KEY != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: deb-package
+
       - name: Import GPG key
-        run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+        if: env.GPG_PRIVATE_KEY != ''
+        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Create apt release if it doesn't exist
+        if: env.GPG_PRIVATE_KEY != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -92,15 +266,17 @@ jobs:
               --latest=false
 
       - name: Upload new .deb to apt release
+        if: env.GPG_PRIVATE_KEY != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload apt \
-            estrella_${{ steps.version.outputs.version }}_arm64.deb \
+            "estrella_${VERSION}_arm64.deb" \
             --repo "${{ github.repository }}" \
             --clobber
 
       - name: Build apt repository metadata
+        if: env.GPG_PRIVATE_KEY != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -113,12 +289,12 @@ jobs:
             --dir . 2>/dev/null || true
 
           # Also include the newly built .deb (overwrites if same version)
-          cp ../estrella_${{ steps.version.outputs.version }}_arm64.deb .
+          cp "../estrella_${VERSION}_arm64.deb" .
 
           # Generate Packages from all .debs
           dpkg-scanpackages --multiversion . > Packages
           sed -i 's|Filename: \./|Filename: |' Packages
-          rm -f *.deb
+          rm -f ./*.deb
           gzip -k -f Packages
 
           # Generate Release file
@@ -134,6 +310,7 @@ jobs:
           gpg --armor --export "${{ secrets.GPG_KEY_ID }}" > gpg.key
 
       - name: Upload apt metadata to release
+        if: env.GPG_PRIVATE_KEY != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

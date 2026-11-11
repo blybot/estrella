@@ -108,27 +108,6 @@ dev: frontend
 	cargo run -- serve
 
 # Bump patch version, tag, and push (e.g., v0.1.0 -> v0.1.1)
-.PHONY: bump-patch-release
-bump-patch-release:
-	@git fetch --tags origin
-	@LATEST=$$(git tag -l 'v*' | sort -V | tail -1); \
-	if [ -z "$$LATEST" ]; then \
-		NEXT="v0.1.0"; \
-	else \
-		MAJOR=$$(echo "$$LATEST" | sed 's/^v//' | cut -d. -f1); \
-		MINOR=$$(echo "$$LATEST" | sed 's/^v//' | cut -d. -f2); \
-		PATCH=$$(echo "$$LATEST" | sed 's/^v//' | cut -d. -f3); \
-		NEXT="v$$MAJOR.$$MINOR.$$((PATCH + 1))"; \
-	fi; \
-	echo "$$LATEST -> $$NEXT"; \
-	sed -i'' -e "s/^version = \".*\"/version = \"$${NEXT#v}\"/" Cargo.toml; \
-	nix develop --command cargo check 2>/dev/null; \
-	git add Cargo.toml Cargo.lock; \
-	git commit -m "release: $$NEXT"; \
-	git tag "$$NEXT"; \
-	git push && git push origin "$$NEXT"; \
-	echo "Released $$NEXT"
-
 .PHONY: help
 help:
 	@echo "Estrella Makefile targets:"
@@ -150,5 +129,4 @@ help:
 	@echo "  patterns           List available patterns"
 	@echo "  run                Run CLI (e.g., make run ARGS='print ripple')"
 	@echo "  preview            Generate preview PNG (e.g., make preview PATTERN=ripple)"
-	@echo "  bump-patch-release Bump patch version, tag, and push to trigger release CI"
 	@echo "  help               Show this help"

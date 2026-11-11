@@ -37,3 +37,41 @@ jobs:
 
       - name: Run e2e tests
         run: nix develop --command bash -c "cd frontend && npx playwright test"
+
+  helm:
+    name: Helm chart and release scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint and render chart
+        run: scripts/test-helm-chart.sh
+
+      - name: Test release versioning
+        run: scripts/test-next-version.sh
+
+  image:
+    name: Container image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: estrella:check
+          cache-from: type=gha,scope=image-amd64
+          cache-to: type=gha,scope=image-amd64,mode=max
+
+      - name: Smoke test image
+        run: scripts/smoke-test-image.sh estrella:check

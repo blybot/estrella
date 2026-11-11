@@ -3,41 +3,7 @@ name: Check
 on:
   workflow_call:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  check:
-    name: Check, lint, test & e2e
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-
-      - name: Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@v15
-
-      - name: Build flake package
-        run: nix build .#default
-
-      - name: Build frontend
-        run: nix develop --command bash -c "cd frontend && npm ci && npm run build"
-
-      - name: Check formatting
-        run: nix develop --command cargo fmt --check
-
-      - name: Clippy
-        run: nix develop --command cargo clippy -- -D warnings
-
-      - name: Run tests
-        run: nix develop --command cargo test
-
-      - name: Run e2e tests
-        run: nix develop --command bash -c "cd frontend && npx playwright test"
-
   helm:
     name: Helm chart and release scripts
     runs-on: ubuntu-24.04

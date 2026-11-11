@@ -5,7 +5,7 @@
 //! ## Test Coverage
 //!
 //! - **Binary tests** (`.bin`): One raster mode + one band mode test (ripple pattern),
-//!   plus all receipts. This validates the command generation pipeline.
+//!   plus all receipts, and the demo and full receipts as ESC/POS. This validates the command generation pipeline.
 //! - **Preview tests** (`.png`): All patterns, receipts, and weave blends get PNG previews.
 //!   This validates visual rendering.
 //!
@@ -19,6 +19,7 @@
 use estrella::PrinterConfig;
 use estrella::document::{self, Component, Divider, Document, Text};
 use estrella::ir::{Op, Program};
+use estrella::printer::Protocol;
 use estrella::receipt;
 use estrella::render::dither::{self, DitheringAlgorithm};
 use estrella::render::patterns::{self, Pattern};
@@ -284,6 +285,12 @@ fn generate_golden_files() {
     write_golden("demo_receipt", "bin", &receipt::demo_receipt_golden());
     write_golden("full_receipt", "bin", &receipt::full_receipt_golden());
     write_golden("markdown_demo", "bin", &receipt::markdown_demo_golden());
+    write_golden("demo_receipt_escpos", "bin", &escpos_receipt("receipt"));
+    write_golden(
+        "full_receipt_escpos",
+        "bin",
+        &escpos_receipt("receipt-full"),
+    );
 
     // Use program_by_name_golden for preview PNGs with fixed dates
     let demo_program = receipt::program_by_name_golden("receipt").unwrap();
@@ -427,6 +434,27 @@ fn test_binary_full_receipt() {
 fn test_binary_markdown_demo() {
     let cmd = receipt::markdown_demo_golden();
     check_golden("markdown_demo", "bin", &cmd);
+}
+
+fn escpos_receipt(name: &str) -> Vec<u8> {
+    receipt::program_by_name_golden(name)
+        .unwrap()
+        .encode(Protocol::EscPos)
+        .unwrap()
+}
+
+#[test]
+fn test_binary_demo_receipt_escpos() {
+    check_golden("demo_receipt_escpos", "bin", &escpos_receipt("receipt"));
+}
+
+#[test]
+fn test_binary_full_receipt_escpos() {
+    check_golden(
+        "full_receipt_escpos",
+        "bin",
+        &escpos_receipt("receipt-full"),
+    );
 }
 
 // ============================================================================

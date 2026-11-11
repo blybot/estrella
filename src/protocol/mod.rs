@@ -46,6 +46,7 @@
 pub mod barcode;
 pub mod commands;
 pub mod cp437;
+pub mod escpos;
 pub mod graphics;
 pub mod nv_graphics;
 pub mod text;

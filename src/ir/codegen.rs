@@ -1,12 +1,22 @@
 //! # Code Generation
 //!
-//! Converts IR programs to StarPRNT protocol bytes.
+//! Converts IR programs to StarPRNT protocol bytes. ESC/POS lives in
+//! `codegen_escpos`; [`Program::encode`] picks between them.
 
 use super::ops::{BarcodeKind, Op, Program};
-use crate::printer::PrinterConfig;
+use crate::error::EstrellaError;
+use crate::printer::{PrinterConfig, Protocol};
 use crate::protocol::{barcode, commands, graphics, nv_graphics, text};
 
 impl Program {
+    /// Compile the IR program to bytes for the given printer protocol.
+    pub fn encode(&self, protocol: Protocol) -> Result<Vec<u8>, EstrellaError> {
+        match protocol {
+            Protocol::Star => Ok(self.to_bytes_with_config(&protocol.config())),
+            Protocol::EscPos => self.to_escpos_bytes(&protocol.config()),
+        }
+    }
+
     /// Compile the IR program to StarPRNT bytes.
     ///
     /// Uses the default printer config (TSP650II).

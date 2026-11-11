@@ -95,6 +95,18 @@ impl PrinterConfig {
         max_chunk_rows: 256,
     };
 
+    /// # Generic 80mm ESC/POS Configuration
+    ///
+    /// 80mm paper, 72mm (576 dots) printable at 203 DPI, e.g. Xprinter XP-80T.
+    pub const ESCPOS_80MM: Self = Self {
+        name: "ESC/POS 80mm",
+        width_dots: 576,
+        width_bytes: 72,
+        dpi: 203,
+        band_height: 24,
+        max_chunk_rows: 256,
+    };
+
     /// Calculate dots per millimeter
     ///
     /// ## Example

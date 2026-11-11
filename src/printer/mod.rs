@@ -5,7 +5,10 @@
 //! ## Modules
 //!
 //! - [`config`]: Printer hardware specifications
+//! - [`protocol`]: Printer command protocol (StarPRNT or ESC/POS)
 
 pub mod config;
+pub mod protocol;
 
 pub use config::PrinterConfig;
+pub use protocol::Protocol;

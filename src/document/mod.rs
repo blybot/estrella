@@ -36,8 +36,9 @@ mod text;
 pub use resolve::{ImageResolver, fetch_image, fetch_image_with_ctx};
 pub use types::*;
 
+use crate::error::EstrellaError;
 use crate::ir::{Op, Program};
-use crate::printer::PrinterConfig;
+use crate::printer::{PrinterConfig, Protocol};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -278,24 +279,34 @@ impl Document {
     /// When `raster` is true, renders the entire document through the bitmap
     /// preview engine and sends it as a single raster image.
     pub fn build_with_config(&self, config: &PrinterConfig) -> Vec<u8> {
-        if self.raster {
-            let program = self.compile();
-            let raw = crate::preview::render_raw(&program).expect("raster render failed");
-            let mut raster_program = Program::new();
-            raster_program.push(Op::Init);
-            raster_program.push(Op::Raster {
-                width: raw.width as u16,
-                height: raw.height as u16,
-                data: raw.data,
-            });
-            if self.cut {
-                raster_program.push(Op::Feed { units: 24 });
-                raster_program.push(Op::Cut { partial: true });
-            }
-            raster_program.to_bytes_with_config(config)
-        } else {
-            self.compile().to_bytes_with_config(config)
+        self.printable_program().to_bytes_with_config(config)
+    }
+
+    /// Compile and generate bytes for the given printer protocol.
+    pub fn build_for(&self, protocol: Protocol) -> Result<Vec<u8>, EstrellaError> {
+        self.printable_program().encode(protocol)
+    }
+
+    /// The program that gets sent to the printer: the compiled document, or
+    /// in raster mode the whole document rendered as a single image.
+    fn printable_program(&self) -> Program {
+        if !self.raster {
+            return self.compile();
         }
+        let program = self.compile();
+        let raw = crate::preview::render_raw(&program).expect("raster render failed");
+        let mut raster_program = Program::new();
+        raster_program.push(Op::Init);
+        raster_program.push(Op::Raster {
+            width: raw.width as u16,
+            height: raw.height as u16,
+            data: raw.data,
+        });
+        if self.cut {
+            raster_program.push(Op::Feed { units: 24 });
+            raster_program.push(Op::Cut { partial: true });
+        }
+        raster_program
     }
 
     /// Build the merged variable map: built-in datetime helpers + user overrides.

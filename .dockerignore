@@ -1,0 +1,14 @@
+.git/
+.github/
+.cargo/
+target/
+result
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+docs/
+helm/
+**/.DS_Store
+.gnupg/
+spec/

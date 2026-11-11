@@ -35,8 +35,14 @@ use state::{AppState, SESSION_EXPIRATION_SECS};
 /// use estrella::server::{serve, ServerConfig};
 ///
 /// # async fn example() -> Result<(), estrella::error::EstrellaError> {
+/// use estrella::printer::Protocol;
+/// use estrella::transport::{Printer, PrinterTarget};
+///
 /// let config = ServerConfig {
-///     device_path: "/dev/rfcomm0".to_string(),
+///     printer: Printer {
+///         protocol: Protocol::Star,
+///         target: PrinterTarget::Device("/dev/rfcomm0".to_string()),
+///     },
 ///     listen_addr: "0.0.0.0:8080".to_string(),
 /// };
 ///
@@ -50,7 +56,39 @@ pub async fn serve(config: ServerConfig) -> Result<(), EstrellaError> {
     // Spawn background cache cleanup task
     tokio::spawn(cleanup_caches(app_state.clone()));
 
-    let app = Router::new()
+    let app = router(app_state);
+
+    println!("Estrella HTTP server starting...");
+    println!("Listening on: {}", config.listen_addr);
+    println!(
+        "Printer: {} ({:?})",
+        config.printer.target, config.printer.protocol
+    );
+    println!();
+    println!(
+        "Open http://{}/ in your browser to print",
+        config.listen_addr
+    );
+    println!();
+
+    let listener = tokio::net::TcpListener::bind(&config.listen_addr)
+        .await
+        .map_err(|e| {
+            EstrellaError::Transport(format!("Failed to bind to {}: {}", config.listen_addr, e))
+        })?;
+
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| EstrellaError::Transport(format!("Server error: {}", e)))?;
+
+    Ok(())
+}
+
+fn router(app_state: Arc<AppState>) -> Router {
+    Router::new()
+        // Liveness/readiness. Deliberately doesn't touch the printer: a printer
+        // that's switched off shouldn't take the web UI down with it.
+        .route("/healthz", get(|| async { "ok" }))
         // Frontend
         .route("/", get(static_files::index_handler))
         .route("/assets/{*path}", get(static_files::asset_handler))
@@ -96,29 +134,7 @@ pub async fn serve(config: ServerConfig) -> Result<(), EstrellaError> {
         )
         .route("/api/photo/{id}/preview", get(handlers::photo::preview))
         .route("/api/photo/{id}/print", post(handlers::photo::print))
-        .with_state(app_state);
-
-    println!("Estrella HTTP server starting...");
-    println!("Listening on: {}", config.listen_addr);
-    println!("Printer device: {}", config.device_path);
-    println!();
-    println!(
-        "Open http://{}/ in your browser to print",
-        config.listen_addr
-    );
-    println!();
-
-    let listener = tokio::net::TcpListener::bind(&config.listen_addr)
-        .await
-        .map_err(|e| {
-            EstrellaError::Transport(format!("Failed to bind to {}: {}", config.listen_addr, e))
-        })?;
-
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| EstrellaError::Transport(format!("Server error: {}", e)))?;
-
-    Ok(())
+        .with_state(app_state)
 }
 
 /// Background task to clean up expired cache entries.
@@ -159,5 +175,36 @@ async fn cleanup_caches(state: Arc<AppState>) {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::printer::Protocol;
+    use crate::transport::{Printer, PrinterTarget};
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    fn app() -> Router {
+        router(Arc::new(AppState::new(ServerConfig {
+            printer: Printer {
+                protocol: Protocol::EscPos,
+                // Nothing listens here: health must not depend on the printer.
+                target: PrinterTarget::Tcp("127.0.0.1:1".into()),
+            },
+            listen_addr: "127.0.0.1:0".into(),
+        })))
+    }
+
+    #[tokio::test]
+    async fn healthz_is_ok_without_a_reachable_printer() {
+        let response = app()
+            .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

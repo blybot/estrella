@@ -36,14 +36,14 @@ use std::path::PathBuf;
 
 use estrella::{
     EstrellaError, document, logos, preview,
-    printer::PrinterConfig,
+    printer::{PrinterConfig, Protocol},
     protocol::{commands, nv_graphics},
     receipt,
     render::dither,
     render::patterns,
     render::weave::{BlendCurve, Weave},
     server,
-    transport::BluetoothTransport,
+    transport::{BluetoothTransport, Printer, PrinterTarget},
 };
 
 /// Estrella - Thermal receipt printer utility
@@ -70,9 +70,8 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         png: Option<PathBuf>,
 
-        /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
-        device: String,
+        #[command(flatten)]
+        printer: PrinterArgs,
 
         /// Pattern height in rows (defaults to pattern's recommended height, or 500)
         #[arg(long)]
@@ -133,12 +132,11 @@ enum Commands {
     /// Start HTTP server for web-based printing
     Serve {
         /// Address and port to bind to
-        #[arg(long, default_value = "0.0.0.0:8080")]
+        #[arg(long, env = "ESTRELLA_LISTEN", default_value = "0.0.0.0:8080")]
         listen: String,
 
-        /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
-        device: String,
+        #[command(flatten)]
+        printer: PrinterArgs,
     },
 
     /// Blend multiple patterns together with crossfade transitions (like a DJ mix)
@@ -163,9 +161,8 @@ enum Commands {
         #[arg(long, value_name = "FILE")]
         png: Option<PathBuf>,
 
-        /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
-        device: String,
+        #[command(flatten)]
+        printer: PrinterArgs,
 
         /// Print width in dots
         #[arg(long, default_value = "576")]
@@ -199,6 +196,36 @@ enum Commands {
     },
 }
 
+/// Which printer to talk to and how.
+#[derive(clap::Args, Debug)]
+struct PrinterArgs {
+    /// Printer command protocol
+    #[arg(long, value_enum, env = "ESTRELLA_PROTOCOL", default_value = "star")]
+    protocol: Protocol,
+
+    /// Printer device path (Bluetooth RFCOMM or serial TTY)
+    #[arg(long, env = "ESTRELLA_DEVICE", default_value = "/dev/rfcomm0")]
+    device: String,
+
+    /// Network printer address, `host` or `host:port` (port defaults to 9100).
+    /// Prints over raw TCP instead of to --device.
+    #[arg(long, env = "ESTRELLA_ADDRESS", conflicts_with = "device")]
+    address: Option<String>,
+}
+
+impl PrinterArgs {
+    fn printer(&self) -> Printer {
+        let target = match &self.address {
+            Some(address) => PrinterTarget::Tcp(address.clone()),
+            None => PrinterTarget::Device(self.device.clone()),
+        };
+        Printer {
+            protocol: self.protocol,
+            target,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum LogoAction {
     /// List all logos in the registry
@@ -207,7 +234,7 @@ enum LogoAction {
     /// Sync registry logos to the printer's NV memory
     Sync {
         /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
+        #[arg(long, env = "ESTRELLA_DEVICE", default_value = "/dev/rfcomm0")]
         device: String,
 
         /// Only sync a specific logo by key
@@ -239,7 +266,7 @@ enum LogoAction {
         key: String,
 
         /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
+        #[arg(long, env = "ESTRELLA_DEVICE", default_value = "/dev/rfcomm0")]
         device: String,
 
         /// Print width in dots (image will be centered/scaled to fit)
@@ -254,14 +281,14 @@ enum LogoAction {
         key: String,
 
         /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
+        #[arg(long, env = "ESTRELLA_DEVICE", default_value = "/dev/rfcomm0")]
         device: String,
     },
 
     /// Delete ALL logos from the printer's NV memory
     DeleteAll {
         /// Printer device path
-        #[arg(long, default_value = "/dev/rfcomm0")]
+        #[arg(long, env = "ESTRELLA_DEVICE", default_value = "/dev/rfcomm0")]
         device: String,
 
         /// Skip confirmation prompt
@@ -285,7 +312,7 @@ fn run() -> Result<(), EstrellaError> {
             pattern,
             list,
             png,
-            device,
+            printer,
             height,
             length,
             width,
@@ -298,6 +325,7 @@ fn run() -> Result<(), EstrellaError> {
             list_params,
             no_params,
         } => {
+            let printer = printer.printer();
             // List patterns if --list flag or no pattern specified
             if list || pattern.is_none() {
                 println!("Available patterns:");
@@ -343,8 +371,7 @@ fn run() -> Result<(), EstrellaError> {
                 // Print all receipts first
                 for receipt_name in receipt::list_receipts() {
                     println!("Printing receipt: {}", receipt_name);
-                    let receipt_data = receipt::by_name(receipt_name).unwrap();
-                    print_raw_to_device(&device, &receipt_data)?;
+                    printer.print_program(&receipt::program_by_name(receipt_name).unwrap())?;
                 }
 
                 // Then print all patterns
@@ -392,10 +419,7 @@ fn run() -> Result<(), EstrellaError> {
                         band,
                         !no_params && !golden,
                     );
-                    let print_data = program
-                        .optimize()
-                        .to_bytes_with_config(&PrinterConfig::TSP650II);
-                    print_raw_to_device(&device, &print_data)?;
+                    printer.print_program(&program.optimize())?;
                 }
 
                 println!("\nAll patterns and receipts printed successfully!");
@@ -406,7 +430,7 @@ fn run() -> Result<(), EstrellaError> {
             if receipt::is_receipt(name) {
                 if raster {
                     // Raster mode: render as full-page raster (no margins)
-                    return print_as_raster(name, png.as_ref(), &device);
+                    return print_as_raster(name, png.as_ref(), &printer);
                 }
 
                 if let Some(png_path) = png {
@@ -423,8 +447,7 @@ fn run() -> Result<(), EstrellaError> {
                 }
 
                 println!("Printing {} receipt...", name);
-                let receipt_data = receipt::by_name(name).unwrap();
-                print_raw_to_device(&device, &receipt_data)?;
+                printer.print_program(&receipt::program_by_name(name).unwrap())?;
                 println!("Printed successfully!");
                 return Ok(());
             }
@@ -517,10 +540,7 @@ fn run() -> Result<(), EstrellaError> {
                     .map_err(|e| EstrellaError::Image(format!("Failed to write PNG: {}", e)))?;
                 println!("Saved to {}", png_path.display());
             } else {
-                let print_data = program
-                    .optimize()
-                    .to_bytes_with_config(&PrinterConfig::TSP650II);
-                print_raw_to_device(&device, &print_data)?;
+                printer.print_program(&program.optimize())?;
                 println!("Printed successfully!");
             }
         }
@@ -551,9 +571,9 @@ fn run() -> Result<(), EstrellaError> {
             }
         },
 
-        Commands::Serve { listen, device } => {
+        Commands::Serve { listen, printer } => {
             let config = server::ServerConfig {
-                device_path: device,
+                printer: printer.printer(),
                 listen_addr: listen,
             };
 
@@ -571,7 +591,7 @@ fn run() -> Result<(), EstrellaError> {
             crossfade,
             curve,
             png,
-            device,
+            printer,
             width,
             golden,
             dither,
@@ -582,7 +602,7 @@ fn run() -> Result<(), EstrellaError> {
                 &crossfade,
                 &curve,
                 png.as_ref(),
-                &device,
+                &printer.printer(),
                 width,
                 golden,
                 &dither,
@@ -760,7 +780,7 @@ fn parse_length_mm(length: &str) -> Result<usize, EstrellaError> {
 fn print_as_raster(
     name: &str,
     png_path: Option<&PathBuf>,
-    device: &str,
+    printer: &Printer,
 ) -> Result<(), EstrellaError> {
     use image::{GrayImage, Luma};
 
@@ -819,8 +839,7 @@ fn print_as_raster(
         program.push(Op::Cut { partial: false });
 
         // Compile to bytes (chunking happens here)
-        let print_data = program.to_bytes();
-        print_raw_to_device(device, &print_data)?;
+        printer.print_program(&program)?;
 
         println!("Printed successfully!");
     }
@@ -1099,7 +1118,7 @@ fn weave_patterns(
     crossfade: &str,
     curve: &str,
     png_path: Option<&PathBuf>,
-    device: &str,
+    printer: &Printer,
     width: usize,
     golden: bool,
     dither_name: &str,
@@ -1213,8 +1232,7 @@ fn weave_patterns(
         program.push(Op::Feed { units: 24 }); // 6mm
         program.push(Op::Cut { partial: false });
 
-        let print_data = program.to_bytes();
-        print_raw_to_device(device, &print_data)?;
+        printer.print_program(&program)?;
         println!("Printed successfully!");
     }
 

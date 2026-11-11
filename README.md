@@ -1,6 +1,6 @@
 # ⭐️ estrella 
 
-A Rust library for [Star Micronics TSP650II](https://star-m.jp/eng/products/s_print/tsp650ii/index.html) thermal receipt printers over Bluetooth. Implements the [StarPRNT](https://starmicronics.com/support/download/starprnt-command-specifications/) protocol with a React-inspired component system, an optimizing compiler, and a web UI for photo printing.
+A Rust library for [Star Micronics TSP650II](https://star-m.jp/eng/products/s_print/tsp650ii/index.html) thermal receipt printers over Bluetooth, and ESC/POS printers (e.g. Xprinter XP-80T) over the network. Implements the [StarPRNT](https://starmicronics.com/support/download/starprnt-command-specifications/) and ESC/POS protocols with a React-inspired component system, an optimizing compiler, and a web UI for photo printing.
 
 ![My Desk](https://github.com/user-attachments/assets/30b569ec-d311-492a-9333-d069e9234289)
 
@@ -317,8 +317,8 @@ Text("B")
 
 ### Prerequisites
 
-- **Printer:** Star Micronics TSP650II (or compatible StarPRNT printer)
-- **Connection:** Bluetooth, paired to create `/dev/rfcomm0`
+- **Printer:** Star Micronics TSP650II (or compatible StarPRNT printer), or an 80mm ESC/POS printer
+- **Connection:** Bluetooth, paired to create `/dev/rfcomm0`, or raw TCP (port 9100) for network printers
 - **Install:** `.deb` package (Raspberry Pi / Debian), Nix (NixOS), or Rust nightly
 
 ### Install on Raspberry Pi (Debian/Ubuntu)
@@ -445,6 +445,28 @@ bluetoothctl info XX:XX:XX:XX:XX:XX
 l2ping -c 1 XX:XX:XX:XX:XX:XX
 sdptool browse XX:XX:XX:XX:XX:XX
 ```
+
+### ESC/POS Network Printers
+
+80mm (576-dot) ESC/POS printers such as the Xprinter XP-80T or Epson TM series are driven over raw TCP:
+
+```bash
+estrella serve --protocol escpos --address 192.168.1.50   # port defaults to 9100
+estrella print receipt --protocol escpos --address 192.168.1.50:9100
+```
+
+Text, styles, 1D barcodes and QR codes use native ESC/POS commands. PDF417 codes, band graphics and built-in logos are rendered and sent as raster images. Upperline and reduced printing have no ESC/POS equivalent and are skipped. Storing logos in NV memory (`estrella logo ...`) is StarPRNT-only.
+
+Printer and server options can also be set with environment variables; flags take precedence:
+
+| Flag | Environment variable | Default |
+|------|----------------------|---------|
+| `--protocol star\|escpos` | `ESTRELLA_PROTOCOL` | `star` |
+| `--address host[:port]` | `ESTRELLA_ADDRESS` | — (uses `--device`) |
+| `--device PATH` | `ESTRELLA_DEVICE` | `/dev/rfcomm0` |
+| `--listen ADDR` (`serve`) | `ESTRELLA_LISTEN` | `0.0.0.0:8080` |
+
+`GET /healthz` returns `ok` while the server is running; it does not check the printer.
 
 ### CLI Reference
 

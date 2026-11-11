@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 /// Server configuration.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
-    /// Path to the printer device (e.g., "/dev/rfcomm0")
-    pub device_path: String,
+    /// The printer to send jobs to
+    pub printer: crate::transport::Printer,
     /// Address to listen on (e.g., "0.0.0.0:8080")
     pub listen_addr: String,
 }

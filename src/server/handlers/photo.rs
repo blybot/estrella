@@ -21,7 +21,6 @@ use crate::{
         self,
         dither::{self, DitheringAlgorithm},
     },
-    transport::BluetoothTransport,
 };
 
 use super::super::state::{AppState, PhotoSession, SESSION_EXPIRATION_SECS};
@@ -330,7 +329,7 @@ pub async fn print(
     let dither_algo = parse_dither(&req.dither);
     let mode = req.mode.clone();
     let cut = req.cut;
-    let device_path = state.config.device_path.clone();
+    let printer = state.config.printer.clone();
 
     // Move all CPU-intensive work to blocking thread pool
     let print_result = tokio::task::spawn_blocking(move || {
@@ -370,9 +369,7 @@ pub async fn print(
         );
         let programs = program.split_for_long_print();
         println!("[photo] Split into {} program(s)", programs.len());
-        let mut transport = BluetoothTransport::open(&device_path)?;
-        transport.send_programs(&programs)?;
-        Ok::<_, crate::EstrellaError>(())
+        printer.print_programs(&programs)
     })
     .await;
 

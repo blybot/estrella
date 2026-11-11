@@ -173,11 +173,17 @@ impl BluetoothTransport {
     /// transport.send_programs(&programs)?;
     /// ```
     pub fn send_programs(&mut self, programs: &[crate::ir::Program]) -> Result<(), EstrellaError> {
-        let total = programs.len();
+        let jobs: Vec<Vec<u8>> = programs.iter().map(|p| p.to_bytes()).collect();
+        self.send_jobs(&jobs)
+    }
+
+    /// Send multiple independent, already-encoded print jobs with pauses
+    /// between them. See [`send_programs`](Self::send_programs).
+    pub fn send_jobs(&mut self, jobs: &[Vec<u8>]) -> Result<(), EstrellaError> {
+        let total = jobs.len();
         println!("[send_programs] Sending {} program(s) to printer", total);
 
-        for (i, program) in programs.iter().enumerate() {
-            let bytes = program.to_bytes();
+        for (i, bytes) in jobs.iter().enumerate() {
             println!(
                 "[send_programs] Job {}/{}: {} bytes",
                 i + 1,
@@ -185,14 +191,14 @@ impl BluetoothTransport {
                 bytes.len()
             );
 
-            self.write_segment(&bytes)?;
+            self.write_segment(bytes)?;
 
             self.file
                 .flush()
                 .map_err(|e| EstrellaError::Transport(format!("Flush failed: {}", e)))?;
 
             // Pause between jobs (but not after the last one)
-            if i < programs.len() - 1 {
+            if i < jobs.len() - 1 {
                 // tcdrain() blocks until all data has been physically transmitted
                 // over the Bluetooth link. Without this, sleep() is meaningless
                 // because the OS buffer still holds all the data.

@@ -13,7 +13,6 @@ use crate::{
     document::{Component, Divider, Document, Markdown, Spacer, Text},
     ir::Program,
     receipt::current_datetime,
-    transport::BluetoothTransport,
 };
 
 use super::super::state::AppState;
@@ -45,12 +44,11 @@ pub async fn print(State(state): State<Arc<AppState>>, Json(form): Json<ReceiptF
     }
 
     // Build the receipt data
-    let receipt_data = build_receipt(&form).to_bytes();
+    let program = build_receipt(&form);
 
     // Print to device (blocking operation, run in separate thread)
-    let device_path = state.config.device_path.clone();
-    let print_result =
-        tokio::task::spawn_blocking(move || print_to_device(&device_path, &receipt_data)).await;
+    let printer = state.config.printer.clone();
+    let print_result = tokio::task::spawn_blocking(move || printer.print_program(&program)).await;
 
     match print_result {
         Ok(Ok(())) => success_response(&form),
@@ -101,13 +99,6 @@ fn build_receipt(form: &ReceiptForm) -> Program {
         ..Default::default()
     }
     .compile()
-}
-
-/// Print to the physical device.
-fn print_to_device(device_path: &str, data: &[u8]) -> Result<(), crate::EstrellaError> {
-    let mut transport = BluetoothTransport::open(device_path)?;
-    transport.write_all(data)?;
-    Ok(())
 }
 
 /// Generate success response JSON.

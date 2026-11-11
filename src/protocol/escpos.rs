@@ -34,6 +34,14 @@ pub fn cancel_kanji_mode() -> Vec<u8> {
     vec![FS, b'.']
 }
 
+/// GS P x y - set the horizontal and vertical motion units to 1/x and 1/y
+/// inch. Feeds (ESC J), positions (ESC $) and cut feeds (GS V) are counted in
+/// these units, and their defaults vary by printer (Xprinter's 80mm series
+/// defaults to 1/180 and 1/360 inch).
+pub fn motion_units(x: u8, y: u8) -> Vec<u8> {
+    vec![GS, b'P', x, y]
+}
+
 /// ESC t n - select character code table (0 = PC437).
 pub fn code_table(n: u8) -> Vec<u8> {
     vec![ESC, b't', n]
@@ -216,6 +224,11 @@ mod tests {
     #[test]
     fn cancel_kanji_mode_is_fs_dot() {
         assert_eq!(cancel_kanji_mode(), vec![0x1C, 0x2E]);
+    }
+
+    #[test]
+    fn motion_units_is_gs_p() {
+        assert_eq!(motion_units(203, 203), vec![0x1D, 0x50, 0xCB, 0xCB]);
     }
 
     #[test]

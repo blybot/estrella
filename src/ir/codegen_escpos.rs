@@ -5,7 +5,9 @@
 //!
 //! - Star's separate size / expanded-width / expanded-height multipliers are
 //!   combined into a single `GS !` character size.
-//! - Feeds are in 1/4 mm; ESC/POS feeds in dots (2 dots per unit at 203 dpi).
+//! - Feeds are in 1/4 mm; ESC/POS feeds in motion units, which Init sets to
+//!   printer dots with GS P (2 dots per unit at 203 dpi). Without it the
+//!   printer's defaults apply (1/360 inch vertical on Xprinter 80mm models).
 //! - Rasters narrower than the print width are padded to full width here, so
 //!   placement doesn't depend on how the firmware applies `ESC a` / `ESC $` to
 //!   `GS v 0`. `SetAbsolutePosition` is only sent to the printer before text.
@@ -24,7 +26,8 @@ use crate::protocol::{cp437, escpos};
 /// buffer of cheap printers.
 const RASTER_CHUNK_ROWS: usize = 256;
 
-/// ESC/POS motion units (dots at 203 dpi) per IR feed unit (1/4 mm).
+/// Dots at 203 dpi per IR feed unit (1/4 mm). Init sets the motion units to
+/// dots with GS P, so ESC J and ESC $ take dot counts.
 const DOTS_PER_FEED_UNIT: u16 = 2;
 
 /// Rows per Star band (`Op::Band`).
@@ -52,6 +55,7 @@ impl Program {
     /// Compile the IR program to ESC/POS bytes.
     pub fn to_escpos_bytes(&self, config: &PrinterConfig) -> Result<Vec<u8>, EstrellaError> {
         let print_width = config.width_dots as usize;
+        let dpi = config.dpi.min(255) as u8;
         let mut state = EncoderState::default();
         let mut out = Vec::new();
 
@@ -59,6 +63,7 @@ impl Program {
             match op {
                 Op::Init => {
                     out.extend(escpos::init());
+                    out.extend(escpos::motion_units(dpi, dpi));
                     out.extend(escpos::cancel_kanji_mode());
                     out.extend(escpos::code_table(0));
                     state = EncoderState::default();
@@ -266,7 +271,9 @@ mod tests {
     use super::*;
     use crate::ir::BarcodeKind;
 
-    const PREAMBLE: [u8; 7] = [0x1B, 0x40, 0x1C, 0x2E, 0x1B, 0x74, 0x00];
+    const PREAMBLE: [u8; 11] = [
+        0x1B, 0x40, 0x1D, 0x50, 203, 203, 0x1C, 0x2E, 0x1B, 0x74, 0x00,
+    ];
 
     fn encode(ops: Vec<Op>) -> Vec<u8> {
         Program { ops }
@@ -275,8 +282,33 @@ mod tests {
     }
 
     #[test]
-    fn init_cancels_chinese_mode_and_selects_cp437() {
+    fn init_sets_dot_motion_units_cancels_chinese_mode_and_selects_cp437() {
         assert_eq!(encode(vec![Op::Init]), PREAMBLE);
+    }
+
+    #[test]
+    fn spacer_feeds_in_printer_dots() {
+        // The 80XX manual's default vertical motion unit is 1/360 inch, so
+        // ESC J's dot count only holds once GS P sets the unit to 1/203 inch.
+        let doc = crate::document::Document {
+            document: vec![
+                crate::document::Component::Text(crate::document::Text {
+                    content: "above".into(),
+                    ..Default::default()
+                }),
+                crate::document::Component::Spacer(crate::document::Spacer::mm(2.0)),
+            ],
+            cut: false,
+            ..Default::default()
+        };
+        let bytes = doc.build_for(crate::printer::Protocol::EscPos).unwrap();
+
+        let set_units = [0x1D, 0x50, 203, 203];
+        let feed_2mm = [0x1B, 0x4A, 16];
+        let units_at = bytes.windows(4).position(|w| w == set_units);
+        let feed_at = bytes.windows(3).position(|w| w == feed_2mm);
+        assert!(units_at.is_some(), "motion units never set: {bytes:02X?}");
+        assert!(units_at < feed_at, "{bytes:02X?}");
     }
 
     #[test]

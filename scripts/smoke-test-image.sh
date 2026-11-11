@@ -68,6 +68,6 @@ for _ in $(seq 1 10); do
   kill -0 "$sink_pid" 2> /dev/null || break
   sleep 1
 done
-head -c 4 "$work/received.bin" | od -An -tx1 | tr -d ' \n' | grep -qx '1b401c2e' || fail "printer received ESC/POS init"
+head -c 4 "$work/received.bin" | od -An -tx1 | tr -d ' \n' | grep -qx '1b401d50' || fail "printer received ESC/POS init"
 grep -q 'smoke test' "$work/received.bin" || fail "printer received the text"
 echo "ok - printer received $(wc -c < "$work/received.bin") bytes of ESC/POS"

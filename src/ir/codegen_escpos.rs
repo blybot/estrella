@@ -9,6 +9,7 @@
 //! - Rasters narrower than the print width are padded to full width here, so
 //!   placement doesn't depend on how the firmware applies `ESC a` / `ESC $` to
 //!   `GS v 0`. `SetAbsolutePosition` is only sent to the printer before text.
+//! - `Beep` uses the vendor `ESC B` buzzer command (Xprinter and similar).
 //! - Ops with no ESC/POS equivalent (PDF417, built-in NV logos) are rendered
 //!   through the preview engine and sent as raster images; band graphics are
 //!   sent as raster images. Upperline and reduced printing are dropped.
@@ -63,6 +64,8 @@ impl Program {
                     state = EncoderState::default();
                 }
                 Op::Cut { partial } => out.extend(escpos::cut_feed(*partial)),
+                // Two 150 ms beeps
+                Op::Beep => out.extend(escpos::beep(2, 3)),
                 Op::Feed { units } => {
                     let mut dots = *units as u16 * DOTS_PER_FEED_UNIT;
                     while dots > 0 {
@@ -302,6 +305,11 @@ mod tests {
             Op::SetExpandedWidth(1),
         ]);
         assert_eq!(bytes, vec![0x1D, 0x21, 0x01, 0x1D, 0x21, 0x11]);
+    }
+
+    #[test]
+    fn beep_sounds_the_buzzer_twice() {
+        assert_eq!(encode(vec![Op::Beep]), vec![0x1B, 0x42, 0x02, 0x03]);
     }
 
     #[test]

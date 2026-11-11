@@ -119,6 +119,9 @@ pub enum Op {
     /// Feed paper. Units are 1/4mm (4 units = 1mm).
     Feed { units: u8 },
 
+    /// Sound the printer's buzzer, if it has one.
+    Beep,
+
     // ========== Style Changes ==========
     /// Set text alignment.
     SetAlign(Alignment),

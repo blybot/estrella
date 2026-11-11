@@ -214,6 +214,9 @@ pub struct Document {
     /// the result as a single raster image. Experimental.
     #[serde(default)]
     pub raster: bool,
+    /// Sound the printer's buzzer after printing (default: false).
+    #[serde(default)]
+    pub beep: bool,
 }
 
 impl Default for Document {
@@ -224,6 +227,7 @@ impl Default for Document {
             variables: HashMap::new(),
             interpolate: true,
             raster: false,
+            beep: false,
         }
     }
 }
@@ -263,6 +267,9 @@ impl Document {
 
         if doc.cut {
             ops.push(Op::Cut { partial: true });
+        }
+        if doc.beep {
+            ops.push(Op::Beep);
         }
 
         let program = Program { ops };
@@ -305,6 +312,9 @@ impl Document {
         if self.cut {
             raster_program.push(Op::Feed { units: 24 });
             raster_program.push(Op::Cut { partial: true });
+        }
+        if self.beep {
+            raster_program.push(Op::Beep);
         }
         raster_program
     }
@@ -466,6 +476,52 @@ mod tests {
         assert!(!doc.cut);
         let ir = doc.compile();
         assert!(!ir.ops.iter().any(|op| matches!(op, Op::Cut { .. })));
+    }
+
+    const ESCPOS_BEEP: [u8; 4] = [0x1B, 0x42, 0x02, 0x03];
+    const ESCPOS_PARTIAL_CUT: [u8; 4] = [0x1D, 0x56, 0x42, 0x00];
+
+    #[test]
+    fn documents_are_silent_by_default() {
+        let json = r#"{"document": [{"type": "text", "content": "hi"}]}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+
+        assert!(!doc.beep);
+        assert!(!doc.compile().ops.contains(&Op::Beep));
+        let bytes = doc.build_for(Protocol::EscPos).unwrap();
+        assert!(!bytes.windows(2).any(|w| w == [0x1B, 0x42]));
+    }
+
+    #[test]
+    fn beep_sounds_after_the_cut() {
+        let json = r#"{"document": [{"type": "text", "content": "hi"}], "beep": true}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+
+        let bytes = doc.build_for(Protocol::EscPos).unwrap();
+
+        let expected_tail: Vec<u8> = [ESCPOS_PARTIAL_CUT, ESCPOS_BEEP].concat();
+        assert!(bytes.ends_with(&expected_tail), "{bytes:02X?}");
+    }
+
+    #[test]
+    fn beep_without_cut_sounds_at_the_end() {
+        let json =
+            r#"{"document": [{"type": "text", "content": "hi"}], "cut": false, "beep": true}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+
+        assert_eq!(doc.compile().ops.last(), Some(&Op::Beep));
+    }
+
+    #[test]
+    fn beep_in_raster_mode_sounds_after_the_cut() {
+        let json =
+            r#"{"document": [{"type": "text", "content": "hi"}], "raster": true, "beep": true}"#;
+        let doc: Document = serde_json::from_str(json).unwrap();
+
+        let bytes = doc.build_for(Protocol::EscPos).unwrap();
+
+        let expected_tail: Vec<u8> = [ESCPOS_PARTIAL_CUT, ESCPOS_BEEP].concat();
+        assert!(bytes.ends_with(&expected_tail), "{bytes:02X?}");
     }
 
     #[test]

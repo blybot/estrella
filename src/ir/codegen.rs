@@ -44,6 +44,9 @@ impl Program {
                 Op::Feed { units } => {
                     out.extend(commands::feed_units(*units));
                 }
+                // The TSP650II has no built-in buzzer; Star's external buzzer
+                // shares the cash drawer port, so nothing is sent.
+                Op::Beep => {}
 
                 // ===== Style Changes =====
                 Op::SetAlign(align) => {
@@ -245,6 +248,15 @@ impl Program {
 mod tests {
     use super::*;
     use crate::protocol::text::Alignment;
+
+    #[test]
+    fn beep_is_silent_on_star() {
+        // The TSP650II has no built-in buzzer.
+        let program = Program {
+            ops: vec![Op::Beep],
+        };
+        assert!(program.to_bytes().is_empty());
+    }
 
     #[test]
     fn test_empty_program() {

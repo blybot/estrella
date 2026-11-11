@@ -46,6 +46,14 @@ pub fn cut_feed(partial: bool) -> Vec<u8> {
     vec![GS, b'V', if partial { 66 } else { 65 }, 0]
 }
 
+/// ESC B n t - sound the buzzer `n` times for `t` × 50 ms each.
+///
+/// Not part of Epson's command set: Xprinter and other Chinese-market printers
+/// add it, documenting 1-9 for both parameters.
+pub fn beep(times: u8, duration: u8) -> Vec<u8> {
+    vec![ESC, b'B', times.clamp(1, 9), duration.clamp(1, 9)]
+}
+
 /// ESC J n - feed paper `n` vertical motion units (dots at 203 dpi).
 pub fn feed_dots(n: u8) -> Vec<u8> {
     vec![ESC, b'J', n]
@@ -264,6 +272,13 @@ mod tests {
     #[test]
     fn absolute_position_little_endian() {
         assert_eq!(absolute_position(300), vec![0x1B, 0x24, 0x2C, 0x01]);
+    }
+
+    #[test]
+    fn beep_is_esc_b_times_and_duration() {
+        assert_eq!(beep(2, 3), vec![0x1B, 0x42, 0x02, 0x03]);
+        // Xprinter documents 1-9 for both
+        assert_eq!(beep(0, 12), vec![0x1B, 0x42, 0x01, 0x09]);
     }
 
     #[test]

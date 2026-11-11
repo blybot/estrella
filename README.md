@@ -265,6 +265,8 @@ The `banner` component uses the same sizing model but auto-selects the largest w
 
 **`cut`** at the top level defaults to `true`. Set to `false` to suppress the paper cut.
 
+**`beep`** at the top level defaults to `false`. Set to `true` to sound the printer's buzzer after printing (ESC/POS: two short beeps via `ESC B`, supported by Xprinter and similar printers; StarPRNT: nothing is sent, as the TSP650II has no built-in buzzer). Estrella never sends a beep otherwise, so a printer that beeps on every receipt is doing so from its own firmware setting.
+
 </details>
 
 ## How It Works: The Compilation Pipeline

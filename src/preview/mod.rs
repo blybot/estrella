@@ -312,7 +312,7 @@ impl PreviewRenderer {
                 }
             }
 
-            Op::NvStore { .. } | Op::NvDelete { .. } => {
+            Op::Beep | Op::NvStore { .. } | Op::NvDelete { .. } => {
                 // These don't produce visible output in preview
             }
         }

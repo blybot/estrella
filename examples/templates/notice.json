@@ -1,0 +1,17 @@
+{
+  "name": "Notice",
+  "description": "A titled notice with an optional message, and an optional link printed as a QR code.",
+  "fields": [
+    {"name": "title", "label": "Title", "type": "text", "required": true},
+    {"name": "message", "label": "Message", "type": "multiline"},
+    {"name": "link", "label": "Link", "type": "url"}
+  ],
+  "document": [
+    {"type": "banner", "content": "{{title}}", "size": 2},
+    {"type": "text", "content": "{{message}}", "when": "message"},
+    {"type": "spacer", "mm": 4, "when": "link"},
+    {"type": "qr_code", "data": "{{link}}", "cell_size": 12, "when": "link"},
+    {"type": "text", "content": "{{date}}", "center": true}
+  ],
+  "cut": true
+}

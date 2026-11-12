@@ -24,7 +24,8 @@ export default defineConfig({
 
   // Run the backend server (serves both API and frontend static files)
   webServer: {
-    command: 'npm run build && cd .. && cargo run -- serve --listen 0.0.0.0:8090',
+    command:
+      'npm run build && cd .. && ESTRELLA_TEMPLATES_DIR=examples/templates cargo run -- serve --listen 0.0.0.0:8090',
     url: 'http://localhost:8090',
     reuseExistingServer: !process.env.CI,
     timeout: 300000, // 5 minutes for backend compilation

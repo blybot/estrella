@@ -41,14 +41,16 @@ import {
 import { PhotoForm, photoPreviewUrl, photoGrayscaleActive, handlePhotoDrop } from './components/PhotoForm'
 import { JsonForm, jsonPreviewUrl, jsonCustomized } from './components/JsonForm'
 import { PrintOptions } from './components/PrintOptions'
+import { TemplateForm, templatePreviewUrl, templateCustomized } from './components/TemplateForm'
 import { LayerCanvas } from './components/LayerCanvas'
 
-export const activeTab = signal<'receipt' | 'patterns' | 'weave' | 'composer' | 'photos' | 'json'>('photos')
+export const activeTab = signal<'receipt' | 'patterns' | 'weave' | 'templates' | 'composer' | 'photos' | 'json'>('photos')
 
 const previewUrls = {
   receipt: () => receiptPreviewUrl.value,
   patterns: () => patternPreviewUrl.value,
   weave: () => weavePreviewUrl.value,
+  templates: () => templatePreviewUrl.value,
   composer: () => editorPreviewUrl.value,
   photos: () => photoPreviewUrl.value,
   json: () => jsonPreviewUrl.value,
@@ -58,6 +60,7 @@ const placeholderTexts = {
   receipt: 'Start typing to see preview...',
   patterns: 'Select a pattern to see preview...',
   weave: 'Add at least 2 patterns to see preview...',
+  templates: 'Choose a template to see preview...',
   composer: 'Add components to see preview...',
   photos: 'Upload an image to see preview...',
   json: 'Edit JSON to see preview...',
@@ -67,6 +70,7 @@ const grayscaleStates = {
   receipt: () => receiptCustomized.value,
   patterns: () => patternCustomized.value,
   weave: () => weaveHasBlend.value,
+  templates: () => templateCustomized.value,
   composer: () => editorCustomized.value,
   photos: () => photoGrayscaleActive.value,
   json: () => jsonCustomized.value,
@@ -135,6 +139,8 @@ export function App() {
             <PatternForm />
           ) : activeTab.value === 'weave' ? (
             <WeaveForm />
+          ) : activeTab.value === 'templates' ? (
+            <TemplateForm />
           ) : activeTab.value === 'composer' ? (
             <EditorForm />
           ) : activeTab.value === 'json' ? (

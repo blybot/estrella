@@ -337,3 +337,67 @@ export async function printPhoto(
   })
   return response.json()
 }
+// ===== Templates =====
+
+export type TemplateFieldType = 'text' | 'multiline' | 'date' | 'url'
+
+export interface TemplateField {
+  name: string
+  label?: string
+  type: TemplateFieldType
+  required: boolean
+  placeholder?: string
+}
+
+export interface TemplateInfo {
+  id: string
+  name: string
+  description?: string
+  fields: TemplateField[]
+}
+
+export interface TemplateList {
+  configured: boolean
+  templates: TemplateInfo[]
+  broken: { id: string; error: string }[]
+  error?: string
+}
+
+export interface TemplateResult extends PrintResult {
+  /// Problems with submitted values, keyed by field name.
+  errors?: Record<string, string>
+}
+
+/// Fetch the templates found in the server's templates directory.
+export async function fetchTemplates(): Promise<TemplateList> {
+  const response = await fetch('/api/templates')
+  if (!response.ok) throw new Error('Failed to fetch templates')
+  return response.json()
+}
+
+/// Preview a template filled with values. Returns a blob URL, or the errors.
+export async function fetchTemplatePreview(
+  id: string,
+  values: Record<string, string>
+): Promise<{ url: string } | TemplateResult> {
+  const response = await fetch(`/api/templates/${encodeURIComponent(id)}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  })
+  if (!response.ok) return response.json()
+  return { url: URL.createObjectURL(await response.blob()) }
+}
+
+/// Print a template filled with values.
+export async function printTemplate(
+  id: string,
+  values: Record<string, string>
+): Promise<TemplateResult> {
+  const response = await fetch(`/api/templates/${encodeURIComponent(id)}/print`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  })
+  return response.json()
+}

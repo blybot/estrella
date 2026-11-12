@@ -832,6 +832,15 @@ mod tests {
     }
 
     #[test]
+    fn example_templates_load() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/templates");
+        let library = TemplateLibrary::load(&dir).unwrap();
+
+        assert!(library.broken.is_empty(), "{:?}", library.broken);
+        assert!(!library.templates.is_empty());
+    }
+
+    #[test]
     fn missing_directory_is_an_error() {
         let error = TemplateLibrary::load(Path::new("/nonexistent/estrella")).unwrap_err();
         assert!(error.contains("/nonexistent/estrella"));

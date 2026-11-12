@@ -394,7 +394,7 @@ define_components! {
 }
 
 /// Generate built-in datetime template variables.
-fn builtin_variables() -> HashMap<String, String> {
+pub(crate) fn builtin_variables() -> HashMap<String, String> {
     use chrono::Local;
 
     let now = Local::now();

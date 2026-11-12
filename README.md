@@ -269,6 +269,39 @@ The `banner` component uses the same sizing model but auto-selects the largest w
 
 </details>
 
+## Templates
+
+The web UI's **Templates** tab prints documents from templates: pick one, fill in a form, preview, print. Templates are `*.json` files in a directory given with `estrella serve --templates-dir DIR` (or `ESTRELLA_TEMPLATES_DIR`); the file name is the template's id (`a-z`, `0-9`, `-`, `_`). The directory is re-read on every request, so edits show up without a restart.
+
+A template is a JSON document plus the fields to ask for:
+
+```json
+{
+  "name": "Notice",
+  "description": "Shown under the template picker.",
+  "fields": [
+    {"name": "title", "label": "Title", "type": "text", "required": true},
+    {"name": "message", "type": "multiline"},
+    {"name": "link", "type": "url"}
+  ],
+  "document": [
+    {"type": "banner", "content": "{{title}}", "size": 2},
+    {"type": "text", "content": "{{message}}", "when": "message"},
+    {"type": "qr_code", "data": "{{link}}", "cell_size": 12, "when": "link"}
+  ],
+  "cut": true
+}
+```
+
+- **Fields**: `type` is `text` (single line), `multiline`, `date` (`YYYY-MM-DD`, shown as a date picker) or `url` (http/https). `label`, `required` and `placeholder` are optional.
+- **Placeholders**: `{{name}}` in any string is replaced by the field's value, or by a built-in: `date` (January 27, 2026), `date_short` (Jan 27), `day` (Monday), `time` (09:30), `time_12h` (9:30 AM), `datetime` (Mon, Jan 27 09:30), `year`, `iso_date` (2026-01-27). A field with the same name as a built-in wins. Values are inserted after the JSON is parsed, so quotes or newlines in them can't break the document.
+- **`when`**: `"when": "field"` on a top-level component leaves it out when that field is empty, e.g. a QR code that only prints when a link was given.
+- Template-level keys are `name`, `description`, `fields`, `document`, `cut`, `raster` and `beep`.
+
+Templates are checked when loaded: unknown keys, misspelt field types, placeholders or `when` that don't match a field, and components that wouldn't be valid with or without the optional fields are all reported, with where they are, in the Templates tab. Submitted values are checked too (required fields, valid dates and URLs, at most 2000 characters).
+
+See [`examples/templates/`](examples/templates/). The API behind the tab: `GET /api/templates`, and `POST /api/templates/{id}/preview` or `/print` with `{"values": {"title": "..."}}`.
+
 ## How It Works: The Compilation Pipeline
 
 Document components emit an intermediate representation (IR), which gets optimized before generating StarPRNT bytes:
@@ -493,6 +526,7 @@ Printer and server options can also be set with environment variables; flags tak
 | `--address host[:port]` | `ESTRELLA_ADDRESS` | — (uses `--device`) |
 | `--device PATH` | `ESTRELLA_DEVICE` | `/dev/rfcomm0` |
 | `--listen ADDR` (`serve`) | `ESTRELLA_LISTEN` | `0.0.0.0:8080` |
+| `--templates-dir DIR` (`serve`) | `ESTRELLA_TEMPLATES_DIR` | — (no Templates) |
 
 `GET /healthz` returns `ok` while the server is running; it does not check the printer.
 

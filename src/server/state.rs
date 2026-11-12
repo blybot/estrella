@@ -12,6 +12,8 @@ use tokio::sync::RwLock;
 pub struct ServerConfig {
     /// The printer to send jobs to
     pub printer: crate::transport::Printer,
+    /// Directory of `*.json` document templates, if any
+    pub templates_dir: Option<std::path::PathBuf>,
     /// Address to listen on (e.g., "0.0.0.0:8080")
     pub listen_addr: String,
 }

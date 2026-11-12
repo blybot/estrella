@@ -4,4 +4,5 @@ pub mod json_api;
 pub mod patterns;
 pub mod photo;
 pub mod receipt;
+pub mod templates;
 pub mod weave;

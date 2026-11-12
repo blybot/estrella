@@ -135,6 +135,10 @@ enum Commands {
         #[arg(long, env = "ESTRELLA_LISTEN", default_value = "0.0.0.0:8080")]
         listen: String,
 
+        /// Directory of JSON document templates for the web UI's Templates tab
+        #[arg(long, env = "ESTRELLA_TEMPLATES_DIR", value_name = "DIR")]
+        templates_dir: Option<PathBuf>,
+
         #[command(flatten)]
         printer: PrinterArgs,
     },
@@ -571,8 +575,13 @@ fn run() -> Result<(), EstrellaError> {
             }
         },
 
-        Commands::Serve { listen, printer } => {
+        Commands::Serve {
+            listen,
+            printer,
+            templates_dir,
+        } => {
             let config = server::ServerConfig {
+                templates_dir,
                 printer: printer.printer(),
                 listen_addr: listen,
             };

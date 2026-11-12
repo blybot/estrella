@@ -21,8 +21,17 @@ use super::super::state::AppState;
 /// Handle POST /api/json/preview - render JSON document as PNG.
 pub async fn preview(
     State(state): State<Arc<AppState>>,
-    Json(mut doc): Json<Document>,
+    Json(doc): Json<Document>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let png_bytes = render_preview(&state, doc).await?;
+    Ok(([(header::CONTENT_TYPE, "image/png")], png_bytes))
+}
+
+/// Resolve a document's images and render its preview PNG.
+pub(super) async fn render_preview(
+    state: &AppState,
+    mut doc: Document,
+) -> Result<Vec<u8>, (StatusCode, String)> {
     // Resolve images from URLs before compilation
     let resolver = ImageResolver::new(state.photo_sessions.clone());
     resolver.resolve(&mut doc).await.map_err(|e| {
@@ -33,14 +42,12 @@ pub async fn preview(
     })?;
 
     let program = doc.compile();
-    let png_bytes = program.to_preview_png().map_err(|e| {
+    program.to_preview_png().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Preview render failed: {}", e),
         )
-    })?;
-
-    Ok(([(header::CONTENT_TYPE, "image/png")], png_bytes))
+    })
 }
 
 /// Request body for canvas-layout endpoint.
@@ -111,18 +118,33 @@ pub async fn canvas_layout(
 }
 
 /// Handle POST /api/json/print - print JSON document to device.
-pub async fn print(State(state): State<Arc<AppState>>, Json(mut doc): Json<Document>) -> Response {
+pub async fn print(State(state): State<Arc<AppState>>, Json(doc): Json<Document>) -> Response {
+    match print_document(&state, doc).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Html(r#"{"success": true, "message": "Document printed successfully"}"#.to_string()),
+        )
+            .into_response(),
+        Err((status, error)) => (
+            status,
+            Html(format!(r#"{{"success": false, "error": "{}"}}"#, error)),
+        )
+            .into_response(),
+    }
+}
+
+/// Resolve a document's images and print it.
+pub(super) async fn print_document(
+    state: &AppState,
+    mut doc: Document,
+) -> Result<(), (StatusCode, String)> {
     // Resolve images from URLs before compilation
     let resolver = ImageResolver::new(state.photo_sessions.clone());
     if let Err(e) = resolver.resolve(&mut doc).await {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            Html(format!(
-                r#"{{"success": false, "error": "Image resolution failed: {}"}}"#,
-                e
-            )),
-        )
-            .into_response();
+            format!("Image resolution failed: {}", e),
+        ));
     }
 
     match serde_json::to_string_pretty(&doc) {
@@ -139,27 +161,15 @@ pub async fn print(State(state): State<Arc<AppState>>, Json(mut doc): Json<Docum
     .await;
 
     match print_result {
-        Ok(Ok(())) => (
-            StatusCode::OK,
-            Html(r#"{"success": true, "message": "Document printed successfully"}"#.to_string()),
-        )
-            .into_response(),
-        Ok(Err(e)) => (
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Html(format!(
-                r#"{{"success": false, "error": "Print failed: {}"}}"#,
-                e
-            )),
-        )
-            .into_response(),
-        Err(e) => (
+            format!("Print failed: {}", e),
+        )),
+        Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Html(format!(
-                r#"{{"success": false, "error": "Task error: {}"}}"#,
-                e
-            )),
-        )
-            .into_response(),
+            format!("Task error: {}", e),
+        )),
     }
 }
 

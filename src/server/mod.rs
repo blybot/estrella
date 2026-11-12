@@ -44,6 +44,7 @@ use state::{AppState, SESSION_EXPIRATION_SECS};
 ///         target: PrinterTarget::Device("/dev/rfcomm0".to_string()),
 ///     },
 ///     listen_addr: "0.0.0.0:8080".to_string(),
+///     templates_dir: None,
 /// };
 ///
 /// serve(config).await?;
@@ -64,6 +65,9 @@ pub async fn serve(config: ServerConfig) -> Result<(), EstrellaError> {
         "Printer: {} ({:?})",
         config.printer.target, config.printer.protocol
     );
+    if let Some(dir) = &config.templates_dir {
+        println!("Templates: {}", dir.display());
+    }
     println!();
     println!(
         "Open http://{}/ in your browser to print",
@@ -134,6 +138,16 @@ fn router(app_state: Arc<AppState>) -> Router {
         )
         .route("/api/photo/{id}/preview", get(handlers::photo::preview))
         .route("/api/photo/{id}/print", post(handlers::photo::print))
+        // Templates
+        .route("/api/templates", get(handlers::templates::list))
+        .route(
+            "/api/templates/{id}/preview",
+            post(handlers::templates::preview),
+        )
+        .route(
+            "/api/templates/{id}/print",
+            post(handlers::templates::print),
+        )
         .with_state(app_state)
 }
 
@@ -188,14 +202,185 @@ mod tests {
     use tower::ServiceExt;
 
     fn app() -> Router {
+        app_with(None, "127.0.0.1:1")
+    }
+
+    fn app_with(templates_dir: Option<std::path::PathBuf>, printer: &str) -> Router {
         router(Arc::new(AppState::new(ServerConfig {
             printer: Printer {
                 protocol: Protocol::EscPos,
-                // Nothing listens here: health must not depend on the printer.
-                target: PrinterTarget::Tcp("127.0.0.1:1".into()),
+                // By default nothing listens here: health must not depend on
+                // the printer.
+                target: PrinterTarget::Tcp(printer.into()),
             },
             listen_addr: "127.0.0.1:0".into(),
+            templates_dir,
         })))
+    }
+
+    const TODO_TEMPLATE: &str = r#"{
+        "name": "TODO",
+        "fields": [
+            {"name": "title", "type": "text", "required": true},
+            {"name": "url", "type": "url"}
+        ],
+        "document": [
+            {"type": "text", "content": "TODO: {{title}}"},
+            {"type": "qr_code", "data": "{{url}}", "when": "url"}
+        ]
+    }"#;
+
+    struct TemplatesDir(std::path::PathBuf);
+
+    impl TemplatesDir {
+        fn new() -> Self {
+            let dir = std::env::temp_dir().join(format!("estrella-api-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("todo.json"), TODO_TEMPLATE).unwrap();
+            std::fs::write(dir.join("broken.json"), r#"{"document": "nope"}"#).unwrap();
+            TemplatesDir(dir)
+        }
+    }
+
+    impl Drop for TemplatesDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    async fn send(app: Router, request: Request<Body>) -> (StatusCode, Vec<u8>) {
+        let response = app.oneshot(request).await.unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, body.to_vec())
+    }
+
+    fn post_json(uri: &str, body: &str) -> Request<Body> {
+        Request::post(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    fn json(body: &[u8]) -> serde_json::Value {
+        serde_json::from_slice(body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn templates_list_is_empty_when_not_configured() {
+        let (status, body) = send(
+            app(),
+            Request::get("/api/templates").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json(&body)["configured"], false);
+    }
+
+    #[tokio::test]
+    async fn templates_list_shows_fields_and_broken_templates() {
+        let dir = TemplatesDir::new();
+
+        let (status, body) = send(
+            app_with(Some(dir.0.clone()), "127.0.0.1:1"),
+            Request::get("/api/templates").body(Body::empty()).unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        let list = json(&body);
+        assert_eq!(list["templates"][0]["id"], "todo");
+        assert_eq!(list["templates"][0]["fields"][1]["type"], "url");
+        assert_eq!(list["broken"][0]["id"], "broken");
+    }
+
+    #[tokio::test]
+    async fn template_preview_renders_a_png() {
+        let dir = TemplatesDir::new();
+
+        let (status, body) = send(
+            app_with(Some(dir.0.clone()), "127.0.0.1:1"),
+            post_json(
+                "/api/templates/todo/preview",
+                r#"{"values": {"title": "Milk"}}"#,
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.starts_with(b"\x89PNG"));
+    }
+
+    #[tokio::test]
+    async fn template_preview_reports_invalid_values_per_field() {
+        let dir = TemplatesDir::new();
+
+        let (status, body) = send(
+            app_with(Some(dir.0.clone()), "127.0.0.1:1"),
+            post_json(
+                "/api/templates/todo/preview",
+                r#"{"values": {"url": "not a url"}}"#,
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let errors = &json(&body)["errors"];
+        assert_eq!(errors["title"], "required");
+        assert_eq!(errors["url"], "must be an http:// or https:// URL");
+    }
+
+    #[tokio::test]
+    async fn unknown_and_broken_templates_are_errors() {
+        let dir = TemplatesDir::new();
+        let app = app_with(Some(dir.0.clone()), "127.0.0.1:1");
+
+        let (status, _) = send(app.clone(), post_json("/api/templates/nope/preview", "{}")).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, _) = send(
+            app.clone(),
+            post_json("/api/templates/..%2Ftodo/preview", "{}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        let (status, body) = send(app, post_json("/api/templates/broken/preview", "{}")).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(json(&body)["error"].as_str().unwrap().contains("broken"));
+    }
+
+    #[tokio::test]
+    async fn template_print_sends_the_filled_document() {
+        let dir = TemplatesDir::new();
+        let printer = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = printer.local_addr().unwrap().to_string();
+        let received = std::thread::spawn(move || {
+            use std::io::Read;
+            let (mut socket, _) = printer.accept().unwrap();
+            let mut bytes = Vec::new();
+            socket.read_to_end(&mut bytes).unwrap();
+            bytes
+        });
+
+        let (status, body) = send(
+            app_with(Some(dir.0.clone()), &address),
+            post_json(
+                "/api/templates/todo/print",
+                r#"{"values": {"title": "Milk", "url": "https://example.com/milk"}}"#,
+            ),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(json(&body)["success"], true);
+        let bytes = received.join().unwrap();
+        let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+        assert!(contains(b"TODO: Milk"));
+        assert!(contains(b"https://example.com/milk"));
     }
 
     #[tokio::test]

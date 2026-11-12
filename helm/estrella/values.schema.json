@@ -33,6 +33,13 @@
         "address": { "type": "string", "minLength": 1 }
       }
     },
+    "templates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingConfigMap": { "type": "string" }
+      }
+    },
     "service": {
       "type": "object",
       "additionalProperties": false,

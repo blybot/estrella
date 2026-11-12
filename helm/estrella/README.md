@@ -33,6 +33,7 @@ New GitHub packages are private by default: make the package public, or add an
 | `image.tag` | chart `appVersion` | `latest` is rejected |
 | `image.pullPolicy` | `IfNotPresent` | |
 | `imagePullSecrets` | `[]` | |
+| `templates.existingConfigMap` | `""` | ConfigMap of `*.json` templates for the web UI's Templates tab, mounted read-only |
 | `service.port` | `80` | |
 | `ingress.enabled` | `true` | |
 | `ingress.className` | `""` | e.g. `nginx` |
@@ -70,6 +71,22 @@ ingress:
   tls:
     enabled: true
 ```
+
+## Templates
+
+The Templates tab fills JSON document templates from a form (see the main
+README for the format). Keep your templates in a ConfigMap and point the
+chart at it:
+
+```bash
+kubectl create configmap estrella-templates --from-file=templates/
+helm upgrade estrella oci://ghcr.io/blybot/helm/estrella --reuse-values \
+  --set templates.existingConfigMap=estrella-templates
+```
+
+Templates are re-read on every request, so after updating the ConfigMap
+they show up once the kubelet syncs it (up to about a minute), with no
+restart. Broken templates are listed in the tab with the reason.
 
 ## Notes
 

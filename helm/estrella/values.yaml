@@ -11,6 +11,12 @@ imagePullSecrets: []
 #   protocol: escpos       # escpos or star
 #   address: 192.168.1.50  # host or host:port; the port defaults to 9100
 
+# Document templates for the web UI's Templates tab: one *.json file per
+# template, from a ConfigMap you manage (e.g. kubectl create configmap
+# estrella-templates --from-file=templates/). Unset: no Templates.
+templates:
+  existingConfigMap: ""
+
 service:
   port: 80
 

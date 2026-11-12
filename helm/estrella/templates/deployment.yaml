@@ -43,6 +43,10 @@ spec:
               value: {{ required "printer.protocol is required (escpos or star)" (.Values.printer).protocol | quote }}
             - name: ESTRELLA_ADDRESS
               value: {{ required "printer.address is required (host or host:port)" (.Values.printer).address | quote }}
+            {{- if .Values.templates.existingConfigMap }}
+            - name: ESTRELLA_TEMPLATES_DIR
+              value: /etc/estrella/templates
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -65,6 +69,16 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          {{- with .Values.templates.existingConfigMap }}
+          volumeMounts:
+            - name: templates
+              mountPath: /etc/estrella/templates
+              readOnly: true
+      volumes:
+        - name: templates
+          configMap:
+            name: {{ . }}
+          {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

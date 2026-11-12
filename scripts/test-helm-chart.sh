@@ -45,6 +45,15 @@ expect_render "extraEnv overrides come last" -f "$example" \
   --set 'extraEnv[0].name=ESTRELLA_LISTEN' --set 'extraEnv[0].value=0.0.0.0:9000'
 [ "$(grep -A1 'name: ESTRELLA_LISTEN' "$work/out.yaml" | grep -c value)" = 2 ] || fail "extraEnv rendered"
 
+! grep -q 'ESTRELLA_TEMPLATES_DIR' "$work/out.yaml" || fail "no templates without a ConfigMap"
+pass "no templates mount by default"
+
+expect_render "templates ConfigMap" -f "$example" --set templates.existingConfigMap=my-templates
+grep -A1 'name: ESTRELLA_TEMPLATES_DIR' "$work/out.yaml" | grep -q 'value: /etc/estrella/templates' || fail "templates dir env"
+grep -A2 'configMap:' "$work/out.yaml" | grep -q 'name: my-templates' || fail "templates ConfigMap volume"
+grep -B1 -A1 'mountPath: /etc/estrella/templates' "$work/out.yaml" | grep -q 'readOnly: true' || fail "templates mounted read-only"
+pass "templates ConfigMap mounted"
+
 # As a dependency of a wrapper chart, with values nested under the chart name.
 mkdir -p "$work/wrapper/charts"
 cp -r "$chart" "$work/wrapper/charts/estrella"
@@ -66,3 +75,4 @@ expect_reject "ingress host is required" "ingress.host is required" \
 expect_reject "unknown protocol" "printer.protocol" -f "$example" --set printer.protocol=zpl
 expect_reject "latest tag" "image.tag" -f "$example" --set image.tag=latest
 expect_reject "unknown value" "additional properties" -f "$example" --set printr.address=x
+expect_reject "unknown templates value" "additional properties" -f "$example" --set templates.configMap=x

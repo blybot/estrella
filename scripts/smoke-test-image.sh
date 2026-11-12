@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Run a built image the way the Helm chart does (read-only root, non-root,
-# ESC/POS over TCP) and check the web UI, health endpoint and JSON API print
-# path against a fake network printer.
+# ESC/POS over TCP, example templates mounted read-only) and check the web UI,
+# health endpoint, templates list and JSON API print path against a fake
+# network printer.
 # Usage: scripts/smoke-test-image.sh <image>   (DOCKER=nerdctl to override)
 set -euo pipefail
 
 image="${1:?usage: $0 <image>}"
+repo="$(cd "$(dirname "$0")/.." && pwd)"
 docker="${DOCKER:-docker}"
 http_port="${HTTP_PORT:-18080}"
 printer_port="${PRINTER_PORT:-19100}"
@@ -46,6 +48,8 @@ sink_pid=$!
   -p "127.0.0.1:$http_port:8080" \
   -e ESTRELLA_PROTOCOL=escpos \
   -e "ESTRELLA_ADDRESS=printer:$printer_port" \
+  -v "$repo/examples/templates:/templates:ro" \
+  -e ESTRELLA_TEMPLATES_DIR=/templates \
   "$image" > /dev/null
 
 for _ in $(seq 1 30); do
@@ -57,6 +61,9 @@ echo "ok - /healthz"
 
 curl -fsS "http://127.0.0.1:$http_port/" | grep -qi '<div id="app"\|<!doctype html' || fail "web UI at /"
 echo "ok - web UI served at /"
+
+curl -fsS "http://127.0.0.1:$http_port/api/templates" | grep -q '"id":"notice"' || fail "templates listed"
+echo "ok - templates listed"
 
 response="$(curl -fsS -X POST "http://127.0.0.1:$http_port/api/json/print" \
   -H 'content-type: application/json' \

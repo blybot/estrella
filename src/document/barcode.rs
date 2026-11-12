@@ -5,6 +5,25 @@ use crate::ir::{BarcodeKind, Op};
 use crate::protocol::barcode::qr::QrErrorLevel;
 use crate::protocol::text::Alignment;
 
+/// Printable width in dots.
+const PRINT_WIDTH: usize = 576;
+
+/// Shrink `cell_size` until the QR code fits the paper. Printers skip a QR
+/// code wider than the print area. StarPRNT additionally caps cells at 8.
+fn fit_qr_cell_size(data: &str, error_level: QrErrorLevel, cell_size: u8) -> u8 {
+    use qrcode::EcLevel;
+    let ec_level = match error_level {
+        QrErrorLevel::L => EcLevel::L,
+        QrErrorLevel::M => EcLevel::M,
+        QrErrorLevel::Q => EcLevel::Q,
+        QrErrorLevel::H => EcLevel::H,
+    };
+    match qrcode::QrCode::with_error_correction_level(data, ec_level) {
+        Ok(code) => cell_size.min((PRINT_WIDTH / code.width()).max(1) as u8),
+        Err(_) => cell_size,
+    }
+}
+
 impl QrCode {
     /// Emit IR ops for this QR code component.
     pub fn emit(&self, ops: &mut Vec<Op>) {
@@ -28,7 +47,11 @@ impl QrCode {
             _ => QrErrorLevel::M, // default
         };
 
-        let cell_size = self.cell_size.unwrap_or(4).clamp(1, 8);
+        let cell_size = fit_qr_cell_size(
+            &self.data,
+            error_level,
+            self.cell_size.unwrap_or(4).clamp(1, 16),
+        );
 
         ops.push(Op::SetAlign(alignment));
         ops.push(Op::QrCode {
@@ -127,6 +150,50 @@ mod tests {
         assert!(
             ops.iter()
                 .any(|op| matches!(op, Op::SetAlign(Alignment::Left)))
+        );
+    }
+
+    fn emitted_cell_size(qr: &QrCode) -> u8 {
+        let mut ops = Vec::new();
+        qr.emit(&mut ops);
+        ops.iter()
+            .find_map(|op| match op {
+                Op::QrCode { cell_size, .. } => Some(*cell_size),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn qr(data: &str, cell_size: u8) -> QrCode {
+        QrCode {
+            data: data.into(),
+            cell_size: Some(cell_size),
+            error_level: None,
+            align: None,
+        }
+    }
+
+    #[test]
+    fn qr_cell_size_goes_up_to_16() {
+        // 25 modules × 16 = 400 dots, fits on 576
+        assert_eq!(emitted_cell_size(&qr("https://example.com", 16)), 16);
+        assert_eq!(emitted_cell_size(&qr("https://example.com", 40)), 16);
+    }
+
+    #[test]
+    fn large_qr_shrinks_to_fit_the_paper() {
+        let url = format!("https://example.com/{}", "a".repeat(150));
+        let modules = qrcode::QrCode::with_error_correction_level(&url, qrcode::EcLevel::M)
+            .unwrap()
+            .width();
+
+        let cell = emitted_cell_size(&qr(&url, 16));
+
+        assert!(cell < 16, "expected the cell size to shrink, got {cell}");
+        assert!(modules * cell as usize <= 576);
+        assert!(
+            modules * (cell as usize + 1) > 576,
+            "should use the largest fit"
         );
     }
 

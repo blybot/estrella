@@ -242,7 +242,7 @@ Each component in the `"document"` array has a `"type"` field and type-specific 
 | `columns` | `left`, `right` | `width` (48), `bold`, `underline`, `invert` (false) |
 | `table` | `rows` | `headers` (null), `border`: "single"/"double"/"mixed"/"heavy"/"shade" (default: "single"); `align` ([] — per-column: "left"/"center"/"right"); `row_separator` (false); `width` (48) |
 | `markdown` | `content` | `show_urls` (false) |
-| `qr_code` | `data` | `cell_size` (4), `error_level` ("M"), `align` ("center") |
+| `qr_code` | `data` | `cell_size` (4; 1–16, shrunk if needed to fit the paper; StarPRNT prints at most 8), `error_level` ("M"), `align` ("center") |
 | `pdf417` | `data` | `module_width` (3), `ecc_level` (2), `align` ("center") |
 | `barcode` | `format`, `data` | `height` (80); format: "code128" / "code39" / "ean13" / "upca" / "itf" |
 | `image` | `url` | `dither` ("floyd-steinberg"), `width` (576), `height` (null), `align` ("center" — also "left", "right"; only affects images narrower than paper) |

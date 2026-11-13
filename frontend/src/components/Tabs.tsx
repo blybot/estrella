@@ -4,6 +4,12 @@ export function Tabs() {
   return (
     <div class="tabs">
       <button
+        class={`tab ${activeTab.value === 'templates' ? 'active' : ''}`}
+        onClick={() => (activeTab.value = 'templates')}
+      >
+        Templates
+      </button>
+      <button
         class={`tab ${activeTab.value === 'photos' ? 'active' : ''}`}
         onClick={() => (activeTab.value = 'photos')}
       >
@@ -26,12 +32,6 @@ export function Tabs() {
         onClick={() => (activeTab.value = 'weave')}
       >
         Weave
-      </button>
-      <button
-        class={`tab ${activeTab.value === 'templates' ? 'active' : ''}`}
-        onClick={() => (activeTab.value = 'templates')}
-      >
-        Templates
       </button>
       <button
         class={`tab ${activeTab.value === 'composer' ? 'active' : ''}`}

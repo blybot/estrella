@@ -7,9 +7,15 @@ test.describe('Tab Navigation', () => {
     await page.locator('button.tab.active').waitFor()
   })
 
-  test('should load with Photos tab active by default', async ({ page }) => {
-    const photosTab = page.locator('button.tab:has-text("Photos")')
-    await expect(photosTab).toHaveClass(/active/)
+  test('should load with Templates as the first, active tab', async ({ page }) => {
+    await expect(page.locator('button.tab').first()).toHaveText('Templates')
+    await expect(page.locator('button.tab:has-text("Templates")')).toHaveClass(/active/)
+  })
+
+  test('should open with the first template selected', async ({ page }) => {
+    // examples/templates has one template, notice.json
+    await expect(page.locator('#template-select')).toHaveValue('notice')
+    await expect(page.locator('#template-field-title')).toBeVisible()
   })
 
   test('should switch to Patterns tab', async ({ page }) => {
@@ -41,7 +47,7 @@ test.describe('Tab Navigation', () => {
   })
 
   test('all tabs should be clickable', async ({ page }) => {
-    const tabs = ['Receipt', 'Patterns', 'Weave', 'Editor', 'Photos']
+    const tabs = ['Receipt', 'Patterns', 'Weave', 'Editor', 'Photos', 'Templates']
 
     for (const tabName of tabs) {
       await page.click(`button.tab:has-text("${tabName}")`)

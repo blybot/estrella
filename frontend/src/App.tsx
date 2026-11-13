@@ -44,7 +44,7 @@ import { PrintOptions } from './components/PrintOptions'
 import { TemplateForm, templatePreviewUrl, templateCustomized } from './components/TemplateForm'
 import { LayerCanvas } from './components/LayerCanvas'
 
-export const activeTab = signal<'receipt' | 'patterns' | 'weave' | 'templates' | 'composer' | 'photos' | 'json'>('photos')
+export const activeTab = signal<'receipt' | 'patterns' | 'weave' | 'templates' | 'composer' | 'photos' | 'json'>('templates')
 
 const previewUrls = {
   receipt: () => receiptPreviewUrl.value,

@@ -36,6 +36,7 @@ const BAND_ROWS: usize = 24;
 #[derive(Default)]
 struct EncoderState {
     alignment: Alignment,
+    upside_down: bool,
     size_width: u8,
     size_height: u8,
     expanded_width: u8,
@@ -44,6 +45,16 @@ struct EncoderState {
 }
 
 impl EncoderState {
+    /// The alignment to send. ESC/POS rotates a whole upside-down line, so
+    /// left and right are swapped to keep the text where the preview shows it.
+    fn printed_alignment(&self) -> Alignment {
+        match (self.upside_down, self.alignment) {
+            (true, Alignment::Left) => Alignment::Right,
+            (true, Alignment::Right) => Alignment::Left,
+            (_, alignment) => alignment,
+        }
+    }
+
     fn char_size(&self) -> Vec<u8> {
         let width = (self.size_width + 1) * (self.expanded_width + 1);
         let height = (self.size_height + 1) * (self.expanded_height + 1);
@@ -89,7 +100,7 @@ impl Program {
 
                 Op::SetAlign(alignment) => {
                     state.alignment = *alignment;
-                    out.extend(escpos::align(*alignment));
+                    out.extend(escpos::align(state.printed_alignment()));
                 }
                 Op::SetFont(font) => out.extend(escpos::font(*font)),
                 Op::SetBold(enabled) => out.extend(escpos::bold(*enabled)),
@@ -109,7 +120,14 @@ impl Program {
                     out.extend(state.char_size());
                 }
                 Op::SetSmoothing(enabled) => out.extend(escpos::smoothing(*enabled)),
-                Op::SetUpsideDown(enabled) => out.extend(escpos::upside_down(*enabled)),
+                Op::SetUpsideDown(enabled) => {
+                    out.extend(escpos::upside_down(*enabled));
+                    let before = state.printed_alignment();
+                    state.upside_down = *enabled;
+                    if state.printed_alignment() != before {
+                        out.extend(escpos::align(state.printed_alignment()));
+                    }
+                }
                 Op::SetUpperline(_) | Op::SetReduced(_) => {}
                 // Star code page 1 is CP437, which is ESC/POS table 0. Init already
                 // selects it, and no other code page is ever emitted.
@@ -395,6 +413,54 @@ mod tests {
     #[test]
     fn beep_sounds_the_buzzer_twice() {
         assert_eq!(encode(vec![Op::Beep]), vec![0x1B, 0x42, 0x02, 0x03]);
+    }
+
+    // ESC/POS rotates a whole upside-down line, so left-aligned text lands on
+    // the right of the paper. Left and right are swapped while upside-down is
+    // on so the paper matches the preview.
+    #[test]
+    fn upside_down_left_text_is_sent_right_aligned() {
+        let bytes = encode(vec![
+            Op::SetAlign(Alignment::Left),
+            Op::SetUpsideDown(true),
+            Op::Text("x".into()),
+            Op::Newline,
+            Op::SetUpsideDown(false),
+        ]);
+        assert_eq!(
+            bytes,
+            vec![
+                0x1B, 0x61, 0x00, // align left
+                0x1B, 0x7B, 0x01, 0x1B, 0x61, 0x02, // upside-down on, align right
+                b'x', 0x0A, //
+                0x1B, 0x7B, 0x00, 0x1B, 0x61, 0x00, // upside-down off, align left
+            ]
+        );
+    }
+
+    #[test]
+    fn alignment_set_while_upside_down_is_swapped() {
+        let bytes = encode(vec![
+            Op::SetUpsideDown(true),
+            Op::SetAlign(Alignment::Right),
+        ]);
+        assert_eq!(
+            bytes,
+            vec![0x1B, 0x7B, 0x01, 0x1B, 0x61, 0x02, 0x1B, 0x61, 0x00]
+        );
+    }
+
+    #[test]
+    fn centred_upside_down_text_is_unchanged() {
+        let bytes = encode(vec![
+            Op::SetAlign(Alignment::Center),
+            Op::SetUpsideDown(true),
+            Op::SetUpsideDown(false),
+        ]);
+        assert_eq!(
+            bytes,
+            vec![0x1B, 0x61, 0x01, 0x1B, 0x7B, 0x01, 0x1B, 0x7B, 0x00]
+        );
     }
 
     #[test]

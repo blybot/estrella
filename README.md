@@ -2,6 +2,8 @@
 
 A Rust library for [Star Micronics TSP650II](https://star-m.jp/eng/products/s_print/tsp650ii/index.html) thermal receipt printers over Bluetooth, and ESC/POS printers (e.g. Xprinter XP-80T) over the network. Implements the [StarPRNT](https://starmicronics.com/support/download/starprnt-command-specifications/) and ESC/POS protocols with a React-inspired component system, an optimizing compiler, and a web UI for photo printing.
 
+This fork adds ESC/POS network printers, a container image and Helm chart, and document templates: see [FORK.md](FORK.md).
+
 ![My Desk](https://github.com/user-attachments/assets/30b569ec-d311-492a-9333-d069e9234289)
 
 ## Photo Printing

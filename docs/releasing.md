@@ -42,8 +42,20 @@ New packages on ghcr.io are private by default. Make `estrella` and `helm/estrel
 CI doesn't run the Rust unit and golden tests, clippy, rustfmt or the Playwright e2e tests. Run them locally before pushing:
 
 ```bash
-make test lint format-check test-e2e
+(cd frontend && npm ci && npm run build)   # embedded in the binary, so build it first
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+(cd frontend && npx playwright test)       # starts a server on :8090 unless one is running
 ```
+
+Without libheif installed, add `--no-default-features` to the cargo commands, and start the e2e server yourself before running Playwright (it reuses a running server):
+
+```bash
+ESTRELLA_TEMPLATES_DIR=examples/templates cargo run --no-default-features -- serve --listen 0.0.0.0:8090
+```
+
+With Nix, `make test lint format-check test-e2e` runs the same checks inside `nix develop`.
 
 ## .deb packages
 

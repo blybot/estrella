@@ -42,7 +42,8 @@ impl Markdown {
 struct ParserState {
     show_urls: bool,
     list_depth: usize,
-    list_counters: Vec<usize>,
+    /// One entry per open list: the next number, or None for bullets.
+    list_counters: Vec<Option<usize>>,
     pending_url: Option<String>,
     pending_list_prefix: Option<String>,
     in_heading: bool,
@@ -130,9 +131,12 @@ impl ParserState {
                 }
             }
             Tag::List(start_num) => {
-                if let Some(start) = start_num {
-                    self.list_counters.push(start as usize);
+                // A nested list starts after its parent item's text.
+                if self.list_depth > 0 {
+                    end_line(ops);
                 }
+                self.list_counters
+                    .push(start_num.map(|start| start as usize));
                 self.list_depth += 1;
                 if self.list_depth == 1 {
                     ops.push(Op::Newline);
@@ -144,7 +148,7 @@ impl ParserState {
                     ops.push(Op::SetAbsolutePosition(indent_dots as u16));
                 }
 
-                if let Some(counter) = self.list_counters.last_mut() {
+                if let Some(Some(counter)) = self.list_counters.last_mut() {
                     self.pending_list_prefix = Some(format!("{}. ", counter));
                     *counter += 1;
                 } else {
@@ -244,14 +248,15 @@ impl ParserState {
                 }
             }
             TagEnd::List(_is_ordered) => {
-                if !self.list_counters.is_empty() {
-                    self.list_counters.pop();
-                }
+                self.list_counters.pop();
                 self.list_depth = self.list_depth.saturating_sub(1);
-                ops.push(Op::Newline);
+                // Blank line after the outermost list only.
+                if self.list_depth == 0 {
+                    ops.push(Op::Newline);
+                }
             }
             TagEnd::Item => {
-                ops.push(Op::Newline);
+                end_line(ops);
                 ops.push(Op::SetAbsolutePosition(0));
             }
             TagEnd::CodeBlock => {
@@ -275,6 +280,18 @@ impl ParserState {
         ops.push(Op::SetInvert(true));
         ops.push(Op::Text(code.to_string()));
         ops.push(Op::SetInvert(false));
+    }
+}
+
+/// End the current line, unless nothing has been printed on it yet.
+fn end_line(ops: &mut Vec<Op>) {
+    let at_line_start = ops
+        .iter()
+        .rev()
+        .find(|op| matches!(op, Op::Text(_) | Op::Newline))
+        .is_none_or(|op| matches!(op, Op::Newline));
+    if !at_line_start {
+        ops.push(Op::Newline);
     }
 }
 
@@ -327,6 +344,89 @@ mod tests {
             })
             .collect();
         assert!(text_ops.iter().any(|s: &&str| s.contains("* ")));
+    }
+
+    /// The printed lines: (indent in dots, text). Style ops are ignored.
+    fn lines(ops: &[Op]) -> Vec<(u16, String)> {
+        let mut lines = vec![(0, String::new())];
+        for op in ops {
+            let current = lines.last_mut().unwrap();
+            match op {
+                Op::Text(s) => current.1.push_str(s),
+                Op::SetAbsolutePosition(dots) if current.1.is_empty() => current.0 = *dots,
+                Op::Newline => lines.push((0, String::new())),
+                _ => {}
+            }
+        }
+        lines
+    }
+
+    fn line(indent: u16, text: &str) -> (u16, String) {
+        (indent, text.to_string())
+    }
+
+    #[test]
+    fn nested_list_items_start_on_their_own_line() {
+        let printed = lines(&compile_markdown("- one\n  - two\n    - three\n- four"));
+
+        assert_eq!(
+            printed,
+            [
+                line(0, ""),
+                line(0, "* one"),
+                line(32, "* two"),
+                line(64, "* three"),
+                line(0, "* four"),
+                line(0, ""),
+                line(0, ""),
+            ]
+        );
+    }
+
+    #[test]
+    fn nested_ordered_lists_number_independently() {
+        let printed = lines(&compile_markdown(
+            "1. step one\n   1. sub a\n   2. sub b\n2. step two",
+        ));
+
+        let text: Vec<_> = printed
+            .iter()
+            .filter(|(_, t)| !t.is_empty())
+            .cloned()
+            .collect();
+        assert_eq!(
+            text,
+            [
+                line(0, "1. step one"),
+                line(32, "1. sub a"),
+                line(32, "2. sub b"),
+                line(0, "2. step two"),
+            ]
+        );
+    }
+
+    #[test]
+    fn bullets_inside_a_numbered_list_stay_bullets() {
+        let printed = lines(&compile_markdown("1. step\n   - note\n2. next"));
+
+        let text: Vec<_> = printed
+            .iter()
+            .filter(|(_, t)| !t.is_empty())
+            .cloned()
+            .collect();
+        assert_eq!(
+            text,
+            [line(0, "1. step"), line(32, "* note"), line(0, "2. next")]
+        );
+    }
+
+    #[test]
+    fn a_list_is_followed_by_one_blank_line() {
+        let printed = lines(&compile_markdown("- a\n  - b\n\nafter"));
+
+        let after = printed.iter().position(|(_, t)| t == "after").unwrap();
+        assert_eq!(printed[after - 1], line(0, ""));
+        assert_ne!(printed[after - 2], line(0, ""), "{printed:?}");
     }
 
     #[test]

@@ -360,6 +360,8 @@ export interface TemplateList {
   configured: boolean
   templates: TemplateInfo[]
   broken: { id: string; error: string }[]
+  /// Files in the templates directory that aren't templates, with the reason.
+  skipped: { name: string; reason: string }[]
   error?: string
 }
 

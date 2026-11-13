@@ -95,6 +95,13 @@ pub struct BrokenTemplate {
     pub error: String,
 }
 
+/// A directory entry that isn't loaded as a template, with the reason.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SkippedFile {
+    pub name: String,
+    pub reason: String,
+}
+
 /// Why filling a template failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FillError {
@@ -109,6 +116,8 @@ pub enum FillError {
 pub struct TemplateLibrary {
     pub templates: Vec<Template>,
     pub broken: Vec<BrokenTemplate>,
+    /// Entries that aren't templates, so an empty list can be explained.
+    pub skipped: Vec<SkippedFile>,
 }
 
 impl TemplateLibrary {
@@ -127,24 +136,32 @@ impl TemplateLibrary {
         let mut files = BTreeMap::new();
         for entry in entries.flatten() {
             let file_name = entry.file_name().to_string_lossy().into_owned();
-            let Some(id) = file_name.strip_suffix(".json") else {
-                continue;
-            };
             if file_name.starts_with('.') {
                 continue;
             }
-            files.insert(id.to_string(), entry.path());
+            files.insert(file_name, entry.path());
             if files.len() >= MAX_FILES {
                 break;
             }
         }
 
         let mut library = TemplateLibrary::default();
-        for (id, path) in files {
-            match read_template_file(&root, &id, &path) {
-                Ok(Some(template)) => library.templates.push(template),
-                Ok(None) => {}
-                Err(error) => library.broken.push(BrokenTemplate { id, error }),
+        for (name, path) in files {
+            let skip = |reason: &str| SkippedFile {
+                name: name.clone(),
+                reason: reason.to_string(),
+            };
+            let Some(id) = name.strip_suffix(".json") else {
+                library.skipped.push(skip("only .json files are templates"));
+                continue;
+            };
+            match read_template_file(&root, id, &path) {
+                Loaded::Template(template) => library.templates.push(template),
+                Loaded::Skipped(reason) => library.skipped.push(skip(reason)),
+                Loaded::Broken(error) => library.broken.push(BrokenTemplate {
+                    id: id.to_string(),
+                    error,
+                }),
             }
         }
         Ok(library)
@@ -155,24 +172,39 @@ impl TemplateLibrary {
     }
 }
 
-/// Read one template file. `Ok(None)` means it isn't a regular file inside
-/// the directory and is skipped.
-fn read_template_file(root: &Path, id: &str, path: &Path) -> Result<Option<Template>, String> {
+enum Loaded {
+    Template(Template),
+    Skipped(&'static str),
+    Broken(String),
+}
+
+fn read_template_file(root: &Path, id: &str, path: &Path) -> Loaded {
     let Ok(target) = path.canonicalize() else {
-        return Ok(None);
+        return Loaded::Skipped("link points to nothing");
     };
-    if !target.starts_with(root) || !target.is_file() {
-        return Ok(None);
+    if !target.starts_with(root) {
+        return Loaded::Skipped("links outside the templates directory are ignored");
+    }
+    if !target.is_file() {
+        return Loaded::Skipped("not a file");
     }
     if !is_valid_id(id) {
-        return Err("file name must only use a-z, 0-9, '-' and '_'".into());
+        return Loaded::Broken("file name must only use a-z, 0-9, '-' and '_'".into());
     }
-    let size = target.metadata().map_err(|e| e.to_string())?.len();
+    let size = match target.metadata() {
+        Ok(metadata) => metadata.len(),
+        Err(e) => return Loaded::Broken(e.to_string()),
+    };
     if size > MAX_FILE_BYTES {
-        return Err(format!("file is larger than {MAX_FILE_BYTES} bytes"));
+        return Loaded::Broken(format!("file is larger than {MAX_FILE_BYTES} bytes"));
     }
-    let text = std::fs::read_to_string(&target).map_err(|e| e.to_string())?;
-    Template::parse(id, &text).map(Some)
+    match std::fs::read_to_string(&target) {
+        Ok(text) => match Template::parse(id, &text) {
+            Ok(template) => Loaded::Template(template),
+            Err(error) => Loaded::Broken(error),
+        },
+        Err(e) => Loaded::Broken(e.to_string()),
+    }
 }
 
 fn is_valid_id(id: &str) -> bool {
@@ -807,6 +839,18 @@ mod tests {
         assert_eq!(ids, ["todo"]);
         let broken: Vec<_> = library.broken.iter().map(|b| b.id.as_str()).collect();
         assert_eq!(broken, ["Bad Name", "broken"]);
+        let skipped: Vec<_> = library
+            .skipped
+            .iter()
+            .map(|s| (s.name.as_str(), s.reason.as_str()))
+            .collect();
+        assert_eq!(
+            skipped,
+            [
+                ("notes.txt", "only .json files are templates"),
+                ("sub.json", "not a file"),
+            ]
+        );
         assert!(library.get("todo").is_some());
         assert!(library.get("../todo").is_none());
     }
@@ -829,6 +873,30 @@ mod tests {
         let ids: Vec<_> = library.templates.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["todo"]);
         assert!(library.broken.is_empty());
+        assert_eq!(library.skipped.len(), 1);
+        assert_eq!(library.skipped[0].name, "escape.json");
+        assert_eq!(
+            library.skipped[0].reason,
+            "links outside the templates directory are ignored"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_yaml_configmap_key_is_reported_as_skipped() {
+        // The real-world mistake: a ConfigMap key named todo.yaml.
+        let dir = TempDir::new();
+        std::fs::create_dir(dir.0.join("..2026_11_13_01_46_09.1")).unwrap();
+        dir.write("..2026_11_13_01_46_09.1/todo.yaml", TODO);
+        std::os::unix::fs::symlink("..2026_11_13_01_46_09.1", dir.0.join("..data")).unwrap();
+        std::os::unix::fs::symlink("..data/todo.yaml", dir.0.join("todo.yaml")).unwrap();
+
+        let library = TemplateLibrary::load(&dir.0).unwrap();
+
+        assert!(library.templates.is_empty());
+        assert_eq!(library.skipped.len(), 1, "{:?}", library.skipped);
+        assert_eq!(library.skipped[0].name, "todo.yaml");
+        assert_eq!(library.skipped[0].reason, "only .json files are templates");
     }
 
     #[test]

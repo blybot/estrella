@@ -207,6 +207,18 @@ export function TemplateForm() {
           </button>
         </>
       )}
+      {current.skipped.length > 0 && (
+        <div class="hint">
+          Not loaded:
+          <ul>
+            {current.skipped.map((s) => (
+              <li key={s.name}>
+                <code>{s.name}</code>: {s.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <button type="button" class="button-secondary" onClick={() => loadTemplates()}>
         Reload templates
       </button>

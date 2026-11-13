@@ -28,6 +28,11 @@ test.describe('Templates tab', () => {
     await expect(page.locator('.error-hint')).toHaveText('must be an http:// or https:// URL')
   })
 
+  test('lists files that are not templates', async ({ page }) => {
+    // examples/templates/README.md isn't a .json file
+    await expect(page.locator('.hint li')).toContainText('README.md: only .json files are templates')
+  })
+
   test('reports required fields when printing', async ({ page }) => {
     // Skip the browser's own required check to exercise the server's.
     await page.locator('#template-field-title').waitFor()

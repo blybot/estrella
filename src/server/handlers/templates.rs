@@ -18,7 +18,7 @@ use std::sync::Arc;
 use super::super::state::AppState;
 use super::json_api::{print_document, render_preview};
 use crate::document::Document;
-use crate::templates::{BrokenTemplate, FillError, Template, TemplateLibrary};
+use crate::templates::{BrokenTemplate, FillError, SkippedFile, Template, TemplateLibrary};
 
 #[derive(Serialize)]
 pub struct TemplateList {
@@ -26,6 +26,8 @@ pub struct TemplateList {
     configured: bool,
     templates: Vec<Template>,
     broken: Vec<BrokenTemplate>,
+    /// Files in the directory that aren't templates, with the reason.
+    skipped: Vec<SkippedFile>,
     /// Why the directory couldn't be read, if it couldn't.
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
@@ -44,6 +46,7 @@ pub async fn list(State(state): State<Arc<AppState>>) -> Json<TemplateList> {
             configured: false,
             templates: Vec::new(),
             broken: Vec::new(),
+            skipped: Vec::new(),
             error: None,
         });
     };
@@ -55,12 +58,14 @@ pub async fn list(State(state): State<Arc<AppState>>) -> Json<TemplateList> {
             configured: true,
             templates: library.templates,
             broken: library.broken,
+            skipped: library.skipped,
             error: None,
         },
         Err(error) => TemplateList {
             configured: true,
             templates: Vec::new(),
             broken: Vec::new(),
+            skipped: Vec::new(),
             error: Some(error),
         },
     })

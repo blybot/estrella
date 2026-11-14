@@ -17,9 +17,14 @@ body {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
     display: flex;
-    align-items: center;
-    justify-content: center;
     padding: 20px;
+}
+
+/* Auto margins centre the app without pushing overflow off the left edge, which justify-content: center does. */
+#app {
+    width: 100%;
+    min-width: 0;
+    margin: auto;
 }
 
 .container {
@@ -28,6 +33,7 @@ body {
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     max-width: 1200px;
     width: 100%;
+    margin: 0 auto;
     padding: 40px;
     transition: max-width 0.3s ease;
 }
@@ -77,6 +83,7 @@ h1 {
 
 .tabs {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 24px;
     border-bottom: 2px solid #e2e8f0;
@@ -121,6 +128,8 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="url"],
+input[type="date"],
 textarea,
 select {
     width: 100%;
@@ -134,6 +143,8 @@ select {
 
 input[type="text"]:focus,
 input[type="number"]:focus,
+input[type="url"]:focus,
+input[type="date"]:focus,
 textarea:focus,
 select:focus {
     outline: none;
@@ -150,6 +161,11 @@ textarea {
     color: #a0aec0;
     font-size: 13px;
     margin-top: 6px;
+}
+
+.hint ul {
+    padding-left: 1.25em;
+    margin: 4px 0 12px;
 }
 
 .hint.error-hint {
@@ -367,8 +383,13 @@ button:disabled {
         flex-direction: column;
     }
 
+    .form-panel {
+        min-width: 0;
+    }
+
     .preview-panel {
         flex: none;
+        width: 100%;
         position: static;
         order: -1;
         margin-bottom: 20px;
@@ -559,8 +580,44 @@ button:disabled {
 }
 
 @media (max-width: 640px) {
+    body {
+        padding: 8px;
+    }
+
     .container {
-        padding: 24px;
+        padding: 16px;
+        border-radius: 12px;
+    }
+
+    .main-layout {
+        gap: 0;
+    }
+
+    .tabs {
+        gap: 4px;
+        margin-bottom: 16px;
+    }
+
+    .tab {
+        padding: 8px 12px;
+        font-size: 14px;
+    }
+
+    .preview-container {
+        padding: 8px;
+    }
+
+    textarea {
+        min-height: 240px;
+    }
+
+    /* iOS Safari zooms the page when focusing a field with text smaller than 16px. */
+    .param-item input[type="text"],
+    .param-item input[type="number"],
+    .editor-row input,
+    .editor-row select,
+    .table-row-editor input {
+        font-size: 16px;
     }
 
     h1 {

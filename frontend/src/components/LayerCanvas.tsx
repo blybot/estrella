@@ -29,7 +29,11 @@ type DragState = {
 } | null
 
 const HANDLE_SIZE = 12
+const TOUCH_HANDLE_SCALE = 2.5
 const MIN_SIZE = 10
+
+// A touch that starts on an element drags it instead of scrolling the page
+const preventScroll = (e: Event) => e.preventDefault()
 
 export function LayerCanvas({
   layers,
@@ -46,6 +50,8 @@ export function LayerCanvas({
   const [dragState, setDragState] = useState<DragState>(null)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [isMouseOver, setIsMouseOver] = useState(false)
+  // Touch has no hover, so once the overlay has been touched it stays visible with larger handles
+  const [isTouch, setIsTouch] = useState(false)
   // Suppress background click after a drag ends (click fires with stale overlay positions)
   const justDraggedRef = useRef(false)
 
@@ -89,9 +95,11 @@ export function LayerCanvas({
     return null
   }, [layers, selectedIndex])
 
-  const handleMouseDown = useCallback((e: MouseEvent, layerIndex: number, corner?: 'nw' | 'ne' | 'sw' | 'se') => {
+  const handleMouseDown = useCallback((e: PointerEvent, layerIndex: number, corner?: 'nw' | 'ne' | 'sw' | 'se') => {
     e.preventDefault()
     e.stopPropagation()
+    // Keep receiving moves when the pointer leaves the overlay mid-drag
+    svgRef.current?.setPointerCapture(e.pointerId)
 
     const point = getSvgPoint(e)
     if (!point) return
@@ -217,8 +225,9 @@ export function LayerCanvas({
     setDragState(null)
   }, [dragState, onDragEnd])
 
-  const handleMouseEnter = useCallback(() => {
+  const handlePointerEnter = useCallback((e: PointerEvent) => {
     setIsMouseOver(true)
+    if (e.pointerType !== 'mouse') setIsTouch(true)
   }, [])
 
   const handleMouseLeave = useCallback(() => {
@@ -279,7 +288,7 @@ export function LayerCanvas({
     ]
 
     // Scale handle size based on viewBox
-    const handleRadius = (HANDLE_SIZE / 2) * (canvasWidth / 576)
+    const handleRadius = (HANDLE_SIZE / 2) * (canvasWidth / 576) * (isTouch ? TOUCH_HANDLE_SCALE : 1)
 
     return corners.map(({ id, cx, cy }) => (
       <circle
@@ -289,7 +298,8 @@ export function LayerCanvas({
         cy={cy}
         r={handleRadius}
         style={{ cursor: getHandleCursor(id) }}
-        onMouseDown={(e) => handleMouseDown(e as unknown as MouseEvent, index, id)}
+        onPointerDown={(e) => handleMouseDown(e as unknown as PointerEvent, index, id)}
+        onTouchStart={preventScroll}
       />
     ))
   }
@@ -297,7 +307,7 @@ export function LayerCanvas({
   if (canvasHeight <= 0) return null
 
   // Show overlay only when mouse is over the preview (or actively dragging)
-  const showOverlay = isMouseOver || dragState !== null
+  const showOverlay = isMouseOver || isTouch || dragState !== null
 
   // Cursor depends on drag state
   const svgCursor = dragState
@@ -313,10 +323,15 @@ export function LayerCanvas({
       viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
       preserveAspectRatio="xMidYMid meet"
       style={svgCursor ? { cursor: svgCursor } : undefined}
-      onMouseMove={handleMouseMove as unknown as (e: Event) => void}
-      onMouseUp={handleMouseUp}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={() => {
+      onPointerDown={() => {
+        // Touch drags suppress the click that would otherwise clear this
+        justDraggedRef.current = false
+      }}
+      onPointerMove={handleMouseMove as unknown as (e: Event) => void}
+      onPointerUp={handleMouseUp}
+      onPointerCancel={handleMouseUp}
+      onPointerEnter={handlePointerEnter as unknown as (e: Event) => void}
+      onPointerLeave={() => {
         handleMouseLeave()
         handleMouseUp()
       }}
@@ -336,14 +351,15 @@ export function LayerCanvas({
               width={layer.width}
               height={layer.height}
               style={{ cursor: 'grab' }}
-              onMouseDown={(e) => handleMouseDown(e as unknown as MouseEvent, index)}
+              onPointerDown={(e) => handleMouseDown(e as unknown as PointerEvent, index)}
+              onTouchStart={preventScroll}
               onDblClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 onDoubleClick?.(index)
               }}
-              onMouseEnter={() => handleLayerMouseEnter(index)}
-              onMouseLeave={handleLayerMouseLeave}
+              onPointerEnter={() => handleLayerMouseEnter(index)}
+              onPointerLeave={handleLayerMouseLeave}
             />
             {isSelected && renderHandles(layer, index)}
           </g>
